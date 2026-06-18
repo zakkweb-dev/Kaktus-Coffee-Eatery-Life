@@ -46,14 +46,8 @@ export default function App() {
     
     window.addEventListener('hashchange', handleHashChange);
     
-    // Clear #admin hash on fresh page load or refresh to prevent getting stuck in Admin mode,
-    // and route user directly to the home landing page.
-    if (window.location.hash === '#admin') {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      setIsAdminMode(false);
-    } else {
-      handleHashChange();
-    }
+    // Check hash on initial load
+    handleHashChange();
 
     // Recover from LocalStorage immediately for instant UI availability while fetching Firestore
     const savedProducts = localStorage.getItem('kaktus_products');

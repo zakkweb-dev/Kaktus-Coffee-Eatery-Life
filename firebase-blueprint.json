@@ -1,0 +1,113 @@
+{
+  "entities": {
+    "Produk": {
+      "title": "Produk",
+      "description": "Daftar produk menu Kaktus Coffee Eatery Life",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "harga": { "type": "number" },
+        "kategori": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "isBestSeller": { "type": "boolean" }
+      },
+      "required": ["id", "nama", "harga", "kategori", "fotoUrl"]
+    },
+    "Launching": {
+      "title": "Launching",
+      "description": "Menu launching baru atau promo khusus",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "hargaNormal": { "type": "number" },
+        "hargaPromo": { "type": "number" },
+        "kategori": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "badge": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "nama", "hargaNormal", "hargaPromo", "kategori", "fotoUrl"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Event terjadwal di cafe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "jam": { "type": "string" },
+        "lokasi": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "deskripsi": { "type": "string" }
+      },
+      "required": ["id", "nama", "tanggal", "jam", "lokasi", "fotoUrl"]
+    },
+    "Galeri": {
+      "title": "Galeri",
+      "description": "Foto galeri kafe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "deskripsi": { "type": "string" }
+      },
+      "required": ["id", "fotoUrl"]
+    },
+    "Cabang": {
+      "title": "Cabang",
+      "description": "Cabang outlet kafe",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "alamat": { "type": "string" },
+        "mapsUrl": { "type": "string" },
+        "noWa": { "type": "string" },
+        "fotoUrl": { "type": "string" }
+      },
+      "required": ["id", "nama", "alamat", "mapsUrl", "noWa", "fotoUrl"]
+    },
+    "DatabaseConfig": {
+      "title": "DatabaseConfig",
+      "description": "Keamanan dan konfigurasi database",
+      "type": "object",
+      "properties": {
+        "adminPassword": { "type": "string" },
+        "useGoogleSheets": { "type": "boolean" },
+        "googleScriptUrl": { "type": "string" }
+      },
+      "required": ["adminPassword", "useGoogleSheets"]
+    }
+  },
+  "firestore": {
+    "produk": {
+      "schema": "Produk",
+      "description": "Koleksi produk"
+    },
+    "launching": {
+      "schema": "Launching",
+      "description": "Koleksi item launching baru"
+    },
+    "event": {
+      "schema": "Event",
+      "description": "Koleksi event terjadwal"
+    },
+    "galeri": {
+      "schema": "Galeri",
+      "description": "Koleksi galeri foto aktivitas"
+    },
+    "cabang": {
+      "schema": "Cabang",
+      "description": "Koleksi cabang outlet"
+    },
+    "config": {
+      "schema": "DatabaseConfig",
+      "description": "Pengaturan database dan password admin"
+    }
+  }
+}

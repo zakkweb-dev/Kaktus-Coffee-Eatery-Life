@@ -15,7 +15,7 @@ import { INITIAL_DATABASE } from '../data';
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
 
 /**
  * Automatically seeds the database with INITIAL_DATABASE values if the collections are empty.
@@ -69,34 +69,51 @@ export async function syncStateArrayToFirestore<T extends { id: string }>(
   newArray: T[]
 ) {
   try {
+    console.log(`[Firebase Sync] Starting sync for collection '${collectionName}'`);
+    console.log(`[Firebase Sync] oldArray size: ${oldArray.length}, newArray size: ${newArray.length}`);
+    
     const batch = writeBatch(db);
     const newIds = newArray.map(item => item.id);
 
     let hasChanges = false;
+    let deleteCount = 0;
+    let writeCount = 0;
 
     // 1. Handle Deletions (present in old but not in new)
     for (const oldItem of oldArray) {
       if (!newIds.includes(oldItem.id)) {
+        console.log(`[Firebase Sync] Queuing DELETION for doc '${oldItem.id}' in '${collectionName}'`);
         batch.delete(doc(db, collectionName, oldItem.id));
         hasChanges = true;
+        deleteCount++;
       }
     }
 
     // 2. Handle Insertions and Updates (present in new, check if changed or new)
     for (const newItem of newArray) {
       const oldItem = oldArray.find(o => o.id === newItem.id);
-      if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+      if (!oldItem) {
+        console.log(`[Firebase Sync] Queuing INSERTION for doc '${newItem.id}' in '${collectionName}'`);
         batch.set(doc(db, collectionName, newItem.id), newItem);
         hasChanges = true;
+        writeCount++;
+      } else if (JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+        console.log(`[Firebase Sync] Queuing UPDATE for doc '${newItem.id}' in '${collectionName}'`);
+        batch.set(doc(db, collectionName, newItem.id), newItem);
+        hasChanges = true;
+        writeCount++;
       }
     }
 
     if (hasChanges) {
+      console.log(`[Firebase Sync] Committing batch to Firestore: ${writeCount} sets, ${deleteCount} deletes`);
       await batch.commit();
-      console.log(`[Firebase] Successfully flushed batch delta sync for ${collectionName}`);
+      console.log(`[Firebase Sync] Successfully committed batch delta sync for '${collectionName}'!`);
+    } else {
+      console.log(`[Firebase Sync] No changes detected for '${collectionName}'. Skipping write.`);
     }
   } catch (error) {
-    console.error(`[Firebase] Batch delta sync error for ${collectionName}:`, error);
+    console.error(`[Firebase Sync] BATCH TRANSACTION FAILED for '${collectionName}':`, error);
   }
 }
 
