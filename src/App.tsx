@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc } from 'firebase/firestore';
-import { db, seedDatabaseIfNeeded, syncArrayToCollection, syncConfig } from './lib/firebase';
+import { db, seedDatabaseIfNeeded, syncStateArrayToFirestore, syncConfig } from './lib/firebase';
 import { INITIAL_DATABASE } from './data';
 import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig } from './types';
 
@@ -149,27 +149,31 @@ export default function App() {
 
   // Sync state modifications to Firebase Cloud Storage with Local cache fallback
   const updateProducts = (newList: Produk[]) => {
+    const oldList = [...products];
     setProducts(newList);
     localStorage.setItem('kaktus_products', JSON.stringify(newList));
-    syncArrayToCollection('produk', newList);
+    syncStateArrayToFirestore('produk', oldList, newList);
   };
 
   const updateLaunches = (newList: Launching[]) => {
+    const oldList = [...launches];
     setLaunches(newList);
     localStorage.setItem('kaktus_launches', JSON.stringify(newList));
-    syncArrayToCollection('launching', newList);
+    syncStateArrayToFirestore('launching', oldList, newList);
   };
 
   const updateEvents = (newList: Event[]) => {
+    const oldList = [...events];
     setEvents(newList);
     localStorage.setItem('kaktus_events', JSON.stringify(newList));
-    syncArrayToCollection('event', newList);
+    syncStateArrayToFirestore('event', oldList, newList);
   };
 
   const updateGallery = (newList: Galeri[]) => {
+    const oldList = [...gallery];
     setGallery(newList);
     localStorage.setItem('kaktus_gallery', JSON.stringify(newList));
-    syncArrayToCollection('galeri', newList);
+    syncStateArrayToFirestore('galeri', oldList, newList);
   };
 
   const updateConfig = (newConfig: DatabaseConfig) => {

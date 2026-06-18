@@ -59,36 +59,44 @@ export async function seedDatabaseIfNeeded() {
 }
 
 /**
- * Syncs a dynamic local array to a Firestore collection, handling insertions, updates,
- * and deletions perfectly via Firestore batch writes.
+ * Syncs changes from a dynamic local state array directly to a Firestore collection,
+ * calculating deltas in memory (insertions, updates, deletions) and executing 
+ * them as an atomic batch write without scan/getDocs latency.
  */
-export async function syncArrayToCollection(collectionName: string, array: any[]) {
+export async function syncStateArrayToFirestore<T extends { id: string }>(
+  collectionName: string,
+  oldArray: T[],
+  newArray: T[]
+) {
   try {
-    const colRef = collection(db, collectionName);
-    const existingDocs = await getDocs(colRef);
-    const existingIds = existingDocs.docs.map(doc => doc.id);
-    const newIds = array.map(item => item.id);
-
     const batch = writeBatch(db);
+    const newIds = newArray.map(item => item.id);
 
-    // Step 1: Delete documents that no longer exist in the local state array
-    for (const oldId of existingIds) {
-      if (!newIds.includes(oldId)) {
-        batch.delete(doc(db, collectionName, oldId));
+    let hasChanges = false;
+
+    // 1. Handle Deletions (present in old but not in new)
+    for (const oldItem of oldArray) {
+      if (!newIds.includes(oldItem.id)) {
+        batch.delete(doc(db, collectionName, oldItem.id));
+        hasChanges = true;
       }
     }
 
-    // Step 2: Add or update existing documents
-    for (const item of array) {
-      if (item.id) {
-        batch.set(doc(db, collectionName, item.id), item);
+    // 2. Handle Insertions and Updates (present in new, check if changed or new)
+    for (const newItem of newArray) {
+      const oldItem = oldArray.find(o => o.id === newItem.id);
+      if (!oldItem || JSON.stringify(oldItem) !== JSON.stringify(newItem)) {
+        batch.set(doc(db, collectionName, newItem.id), newItem);
+        hasChanges = true;
       }
     }
 
-    await batch.commit();
-    console.log(`[Firebase] Successfully synced ${collectionName} with Firestore!`);
+    if (hasChanges) {
+      await batch.commit();
+      console.log(`[Firebase] Successfully flushed batch delta sync for ${collectionName}`);
+    }
   } catch (error) {
-    console.error(`[Firebase] Sync error for ${collectionName}:`, error);
+    console.error(`[Firebase] Batch delta sync error for ${collectionName}:`, error);
   }
 }
 
