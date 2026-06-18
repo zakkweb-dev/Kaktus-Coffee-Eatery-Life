@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { collection, onSnapshot, doc } from 'firebase/firestore';
+import { db, seedDatabaseIfNeeded, syncArrayToCollection, syncConfig } from './lib/firebase';
 import { INITIAL_DATABASE } from './data';
 import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig } from './types';
 
@@ -35,7 +37,7 @@ export default function App() {
   const [isLoadingCloud, setIsLoadingCloud] = useState(false);
   const [cloudError, setCloudError] = useState('');
 
-  // 1. Initial State bootstrapping
+  // 1. Initial Route and Hash bootstrapping
   useEffect(() => {
     // Check if hashes exist in address bar to route directly
     const handleHashChange = () => {
@@ -53,7 +55,7 @@ export default function App() {
       handleHashChange();
     }
 
-    // Load or bootstrap values in localStorage
+    // Recover from LocalStorage immediately for instant UI availability while fetching Firestore
     const savedProducts = localStorage.getItem('kaktus_products');
     const savedLaunches = localStorage.getItem('kaktus_launches');
     const savedEvents = localStorage.getItem('kaktus_events');
@@ -61,115 +63,119 @@ export default function App() {
     const savedBranches = localStorage.getItem('kaktus_branches');
     const savedConfig = localStorage.getItem('kaktus_config');
 
-    if (savedProducts && savedLaunches && savedEvents && savedGallery && savedBranches && savedConfig) {
-      setProducts(JSON.parse(savedProducts));
-      setLaunches(JSON.parse(savedLaunches));
-      setEvents(JSON.parse(savedEvents));
-      setGallery(JSON.parse(savedGallery));
-      setBranches(JSON.parse(savedBranches));
-      setConfig(JSON.parse(savedConfig));
-    } else {
-      // Bootstrap with dynamic seed data
-      localStorage.setItem('kaktus_products', JSON.stringify(INITIAL_DATABASE.produk));
-      localStorage.setItem('kaktus_launches', JSON.stringify(INITIAL_DATABASE.launching));
-      localStorage.setItem('kaktus_events', JSON.stringify(INITIAL_DATABASE.event));
-      localStorage.setItem('kaktus_gallery', JSON.stringify(INITIAL_DATABASE.galeri));
-      localStorage.setItem('kaktus_branches', JSON.stringify(INITIAL_DATABASE.cabang));
-      localStorage.setItem('kaktus_config', JSON.stringify(INITIAL_DATABASE.config));
-
-      setProducts(INITIAL_DATABASE.produk);
-      setLaunches(INITIAL_DATABASE.launching);
-      setEvents(INITIAL_DATABASE.event);
-      setGallery(INITIAL_DATABASE.galeri);
-      setBranches(INITIAL_DATABASE.cabang);
-      setConfig(INITIAL_DATABASE.config);
-    }
+    if (savedProducts) setProducts(JSON.parse(savedProducts));
+    if (savedLaunches) setLaunches(JSON.parse(savedLaunches));
+    if (savedEvents) setEvents(JSON.parse(savedEvents));
+    if (savedGallery) setGallery(JSON.parse(savedGallery));
+    if (savedBranches) setBranches(JSON.parse(savedBranches));
+    if (savedConfig) setConfig(JSON.parse(savedConfig));
 
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // 2. Fetch live data from Google Sheets if enabled
+  // 2. Real-time Firebase Firestore synchronizer
   useEffect(() => {
-    if (!config.useGoogleSheets || !config.googleScriptUrl) {
-      // If disabled, we rely gracefully on the local state loaded above
-      return;
-    }
+    // Bootstrap Firestore with default data if empty
+    seedDatabaseIfNeeded();
 
-    const fetchGoogleSheetsData = async () => {
-      setIsLoadingCloud(true);
-      setCloudError('');
-      try {
-        const response = await fetch(config.googleScriptUrl, {
-          method: 'GET'
-        });
-        
-        if (!response.ok) {
-          throw new Error('Respons jaringan Server Apps Script tidak valid');
-        }
+    // Register live listeners
+    const unsubProducts = onSnapshot(collection(db, 'produk'), (snapshot) => {
+      const items: Produk[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as Produk);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setProducts(sorted);
+      localStorage.setItem('kaktus_products', JSON.stringify(sorted));
+    });
 
-        const resData = await response.json();
-        
-        if (resData && resData.success && resData.data) {
-          const cloudData = resData.data;
-          
-          if (cloudData.produk && cloudData.produk.length > 0) {
-            setProducts(cloudData.produk);
-            localStorage.setItem('kaktus_products', JSON.stringify(cloudData.produk));
-          }
-          if (cloudData.launching && cloudData.launching.length > 0) {
-            setLaunches(cloudData.launching);
-            localStorage.setItem('kaktus_launches', JSON.stringify(cloudData.launching));
-          }
-          if (cloudData.event && cloudData.event.length > 0) {
-            setEvents(cloudData.event);
-            localStorage.setItem('kaktus_events', JSON.stringify(cloudData.event));
-          }
-          if (cloudData.galeri && cloudData.galeri.length > 0) {
-            setGallery(cloudData.galeri);
-            localStorage.setItem('kaktus_gallery', JSON.stringify(cloudData.galeri));
-          }
-          if (cloudData.cabang && cloudData.cabang.length > 0) {
-            setBranches(cloudData.cabang);
-            localStorage.setItem('kaktus_branches', JSON.stringify(cloudData.cabang));
-          }
-        } else {
-          throw new Error('Isi formulir data Google Sheets kosong atau tidak berstruktur');
-        }
-      } catch (err: any) {
-        console.warn('Google Sheets Fetch Error, falling back to LocalStorage:', err);
-        setCloudError('Gagal memuat database cloud, menggunakan cadangan lokal offline.');
-      } finally {
-        setIsLoadingCloud(false);
+    const unsubLaunches = onSnapshot(collection(db, 'launching'), (snapshot) => {
+      const items: Launching[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as Launching);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setLaunches(sorted);
+      localStorage.setItem('kaktus_launches', JSON.stringify(sorted));
+    });
+
+    const unsubEvents = onSnapshot(collection(db, 'event'), (snapshot) => {
+      const items: Event[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as Event);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setEvents(sorted);
+      localStorage.setItem('kaktus_events', JSON.stringify(sorted));
+    });
+
+    const unsubGallery = onSnapshot(collection(db, 'galeri'), (snapshot) => {
+      const items: Galeri[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as Galeri);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setGallery(sorted);
+      localStorage.setItem('kaktus_gallery', JSON.stringify(sorted));
+    });
+
+    const unsubBranches = onSnapshot(collection(db, 'cabang'), (snapshot) => {
+      const items: Cabang[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as Cabang);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setBranches(sorted);
+      localStorage.setItem('kaktus_branches', JSON.stringify(sorted));
+    });
+
+    const unsubConfig = onSnapshot(doc(db, 'config', 'default'), (snapshot) => {
+      if (snapshot.exists()) {
+        const configData = snapshot.data() as DatabaseConfig;
+        setConfig(configData);
+        localStorage.setItem('kaktus_config', JSON.stringify(configData));
       }
+    });
+
+    return () => {
+      unsubProducts();
+      unsubLaunches();
+      unsubEvents();
+      unsubGallery();
+      unsubBranches();
+      unsubConfig();
     };
+  }, []);
 
-    fetchGoogleSheetsData();
-  }, [config.useGoogleSheets, config.googleScriptUrl]);
-
-  // Sync state modifications to Local Storage
+  // Sync state modifications to Firebase Cloud Storage with Local cache fallback
   const updateProducts = (newList: Produk[]) => {
     setProducts(newList);
     localStorage.setItem('kaktus_products', JSON.stringify(newList));
+    syncArrayToCollection('produk', newList);
   };
 
   const updateLaunches = (newList: Launching[]) => {
     setLaunches(newList);
     localStorage.setItem('kaktus_launches', JSON.stringify(newList));
+    syncArrayToCollection('launching', newList);
   };
 
   const updateEvents = (newList: Event[]) => {
     setEvents(newList);
     localStorage.setItem('kaktus_events', JSON.stringify(newList));
+    syncArrayToCollection('event', newList);
   };
 
   const updateGallery = (newList: Galeri[]) => {
     setGallery(newList);
     localStorage.setItem('kaktus_gallery', JSON.stringify(newList));
+    syncArrayToCollection('galeri', newList);
   };
 
   const updateConfig = (newConfig: DatabaseConfig) => {
     setConfig(newConfig);
     localStorage.setItem('kaktus_config', JSON.stringify(newConfig));
+    syncConfig(newConfig);
   };
 
   // Safe scroll trigger
