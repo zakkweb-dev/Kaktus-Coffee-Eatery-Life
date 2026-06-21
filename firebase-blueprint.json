@@ -24,13 +24,13 @@
         "nama": { "type": "string" },
         "hargaNormal": { "type": "number" },
         "hargaPromo": { "type": "number" },
-        "kategori": { "type": "string" },
-        "fotoUrl": { "type": "string" },
+        "tanggalMulai": { "type": "string" },
+        "tanggalSelesai": { "type": "string" },
         "badge": { "type": "string" },
-        "deskripsi": { "type": "string" },
+        "fotoUrl": { "type": "string" },
         "isActive": { "type": "boolean" }
       },
-      "required": ["id", "nama", "hargaNormal", "hargaPromo", "kategori", "fotoUrl"]
+      "required": ["id", "nama", "hargaNormal", "hargaPromo", "fotoUrl"]
     },
     "Event": {
       "title": "Event",
@@ -40,12 +40,10 @@
         "id": { "type": "string" },
         "nama": { "type": "string" },
         "tanggal": { "type": "string" },
-        "jam": { "type": "string" },
-        "lokasi": { "type": "string" },
         "fotoUrl": { "type": "string" },
         "deskripsi": { "type": "string" }
       },
-      "required": ["id", "nama", "tanggal", "jam", "lokasi", "fotoUrl"]
+      "required": ["id", "nama", "tanggal", "fotoUrl"]
     },
     "Galeri": {
       "title": "Galeri",
@@ -66,22 +64,78 @@
         "id": { "type": "string" },
         "nama": { "type": "string" },
         "alamat": { "type": "string" },
+        "jamOperasional": { "type": "string" },
         "mapsUrl": { "type": "string" },
         "noWa": { "type": "string" },
-        "fotoUrl": { "type": "string" }
+        "fotoUrl": { "type": "string" },
+        "linkGrabFood": { "type": "string" },
+        "noWaCake": { "type": "string" },
+        "pesanWaCake": { "type": "string" }
       },
       "required": ["id", "nama", "alamat", "mapsUrl", "noWa", "fotoUrl"]
     },
-    "DatabaseConfig": {
-      "title": "DatabaseConfig",
-      "description": "Keamanan dan konfigurasi database",
+    "CustomCake": {
+      "title": "CustomCake",
+      "description": "Koleksi model kue kustomisasi premium",
       "type": "object",
       "properties": {
-        "adminPassword": { "type": "string" },
-        "useGoogleSheets": { "type": "boolean" },
-        "googleScriptUrl": { "type": "string" }
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "deskripsi": { "type": "string" },
+        "hargaMulai": { "type": "number" },
+        "fotoUrl": { "type": "string" },
+        "pilihanRasa": { "type": "string" },
+        "isActive": { "type": "boolean" }
       },
-      "required": ["adminPassword", "useGoogleSheets"]
+      "required": ["id", "nama", "deskripsi", "hargaMulai", "fotoUrl"]
+    },
+    "DatabaseConfig": {
+      "title": "DatabaseConfig",
+      "description": "Pengaturan database dan link GrabFood",
+      "type": "object",
+      "properties": {
+        "linkGrabFood": { "type": "string" }
+      },
+      "required": ["linkGrabFood"]
+    },
+    "Admins": {
+      "title": "Admins",
+      "description": "Daftar administrator dengan role Owner atau Manager",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["Owner", "Manager"] }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "HeroBanner": {
+      "title": "HeroBanner",
+      "description": "Metadata banner hero interaktif",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fotoUrl": { "type": "string" },
+        "title": { "type": "string" },
+        "subtitle": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "fotoUrl", "isActive", "order"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "Ulasan customer real-time",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "rating": { "type": "number" },
+        "ulasan": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "nama", "rating", "ulasan", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -105,9 +159,25 @@
       "schema": "Cabang",
       "description": "Koleksi cabang outlet"
     },
+    "custom_cake": {
+      "schema": "CustomCake",
+      "description": "Koleksi model kue kustomisasi premium"
+    },
     "config": {
       "schema": "DatabaseConfig",
-      "description": "Pengaturan database dan password admin"
+      "description": "Pengaturan database"
+    },
+    "admins": {
+      "schema": "Admins",
+      "description": "Daftar administrator"
+    },
+    "hero_banners": {
+      "schema": "HeroBanner",
+      "description": "Pengaturan banner slider utama"
+    },
+    "reviews": {
+      "schema": "Review",
+      "description": "Ulasan customer real-time"
     }
   }
 }

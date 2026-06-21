@@ -1,5 +1,6 @@
 import { MapPin, Clock, MessageSquare, ExternalLink } from 'lucide-react';
 import { Cabang } from '../types';
+import ImageWithFallback from './ImageWithFallback';
 
 interface CabangProps {
   branches: Cabang[];
@@ -44,11 +45,10 @@ export default function CabangSection({ branches }: CabangProps) {
             >
               {/* Photo */}
               <div className="relative aspect-[16/10] overflow-hidden">
-                <img
+                <ImageWithFallback
                   src={branch.fotoUrl}
                   alt={branch.nama}
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  referrerPolicy="no-referrer"
                   loading="lazy"
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex items-end p-4">

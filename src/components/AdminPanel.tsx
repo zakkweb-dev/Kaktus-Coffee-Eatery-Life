@@ -1,9 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword,
+  updateProfile,
+  getAuth
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  setDoc, 
+  deleteDoc, 
+  getDocs,
+  getDoc,
+  onSnapshot
+} from 'firebase/firestore';
 import { 
   ShieldCheck, LogOut, LayoutGrid, Package, Calendar, Image as ImageIcon, 
-  Settings, Plus, Edit, Trash2, Key, Database, RefreshCw, FileText, Check, Copy, Laptop, Globe
+  Settings, Plus, Edit, Trash2, Database, Sliders, Cake, RefreshCw, Key,
+  UserPlus, ShieldAlert, Loader2, Upload, MessageSquare, ExternalLink, Users, Star, Check, Trash, Clock, CheckCircle2
 } from 'lucide-react';
-import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig } from '../types';
+import { db, auth } from '../lib/firebase';
+import { Review, Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, HeroBanner, CustomCake, AdminCredentials } from '../types';
+import firebaseConfig from '../../firebase-applet-config.json';
+import ImageWithFallback from './ImageWithFallback';
 
 interface AdminPanelProps {
   products: Produk[];
@@ -11,12 +31,22 @@ interface AdminPanelProps {
   events: Event[];
   gallery: Galeri[];
   branches: Cabang[];
+  customCakes: CustomCake[];
   onUpdateProducts: (products: Produk[]) => void;
   onUpdateLaunches: (launches: Launching[]) => void;
   onUpdateEvents: (events: Event[]) => void;
   onUpdateGallery: (gallery: Galeri[]) => void;
+  onUpdateCustomCakes: (customCakes: CustomCake[]) => void;
+  onUpdateBranches?: (branches: Cabang[]) => void;
   config: DatabaseConfig;
   onUpdateConfig: (config: DatabaseConfig) => void;
+  banners: HeroBanner[];
+  onUpdateBanners: (banners: HeroBanner[]) => void;
+  user: any;
+  adminRole: 'Owner' | 'Manager' | null;
+  checkingAdmin: boolean;
+  onLogout: () => void;
+  onShowToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export default function AdminPanel({
@@ -25,911 +55,1018 @@ export default function AdminPanel({
   events,
   gallery,
   branches,
+  customCakes,
   onUpdateProducts,
   onUpdateLaunches,
   onUpdateEvents,
   onUpdateGallery,
+  onUpdateCustomCakes,
+  onUpdateBranches,
   config,
-  onUpdateConfig
+  onUpdateConfig,
+  banners,
+  onUpdateBanners,
+  user,
+  adminRole,
+  checkingAdmin,
+  onLogout,
+  onShowToast
 }: AdminPanelProps) {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [emailInput, setEmailInput] = useState('');
-  const [passwordInput, setPasswordInput] = useState('');
-  const [loginError, setLoginError] = useState('');
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'produk' | 'launching' | 'event' | 'galeri' | 'database'>('dashboard');
+  
+  // Tab control states (Supporting Cabang and Manager Accounts)
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'produk' | 'launching' | 'event' | 'galeri' | 'custom_cake' | 'hero_banner' | 'cabang' | 'settings' | 'admins' | 'reviews'>('dashboard');
 
-  // Sub-managing state
-  const [copiedScript, setCopiedScript] = useState(false);
-  const [dbStatusMsg, setDbStatusMsg] = useState('');
-  const [dbIsTesting, setDbIsTesting] = useState(false);
+  // Customer Reviews state
+  const [panelReviews, setPanelReviews] = useState<Review[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(true);
 
-  // Form states
-  const [productForm, setProductForm] = useState<Partial<Produk> | null>(null);
-  const [launchForm, setLaunchForm] = useState<Partial<Launching> | null>(null);
-  const [eventForm, setEventForm] = useState<Partial<Event> | null>(null);
-  const [galleryForm, setGalleryForm] = useState<Partial<Galeri> | null>(null);
-
-  // Custom confirmation modal state
-  const [deleteConfirmation, setDeleteConfirmation] = useState<{
-    displayText: string;
-    onConfirm: () => void;
-  } | null>(null);
-
-  // Helper to sync single changes in background to Google Sheets
-  const syncActionToGoogleSheets = async (action: 'save' | 'delete', sheetName: string, itemData: any) => {
-    if (!config.useGoogleSheets || !config.googleScriptUrl) return;
-    try {
-      const response = await fetch(config.googleScriptUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // Avoids CORS pre-flight
-        body: JSON.stringify({
-          action,
-          sheet: sheetName,
-          data: itemData
-        })
+  // Load reviews real-time
+  React.useEffect(() => {
+    const reviewsRef = collection(db, 'reviews');
+    const unsubscribe = onSnapshot(reviewsRef, (snapshot) => {
+      const list: Review[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        list.push({
+          id: doc.id,
+          nama: data.nama || '',
+          rating: Number(data.rating) || 5,
+          ulasan: data.ulasan || '',
+          status: data.status || 'pending',
+          createdAt: Number(data.createdAt) || Date.now()
+        });
       });
-      const resData = await response.json();
-      if (!resData.success) {
-        console.warn('Google Sheets Sync Warning:', resData.error);
-      }
-    } catch (e) {
-      console.error('Google Sheets Sync Exception:', e);
-    }
-  };
-
-  // Initialize and check session
-  useEffect(() => {
-    const session = localStorage.getItem('kaktus_admin_session');
-    if (session === 'active') {
-      setIsLoggedIn(true);
-    }
+      setPanelReviews(list);
+      setLoadingReviews(false);
+    }, (error) => {
+      console.error("[Admin Panel] Error loading reviews:", error);
+      setLoadingReviews(false);
+    });
+    return () => unsubscribe();
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'pending' | 'approved'>('all');
+  const [deleteConfirmReviewId, setDeleteConfirmReviewId] = useState<string | null>(null);
+
+  // Authentication form states - Standard Username and Password ONLY (Google and public registers removed)
+  const [usernameInput, setUsernameInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Manager Accounts creation state - Exclusive to Owner
+  const [newManagerUsername, setNewManagerUsername] = useState('');
+  const [newManagerPassword, setNewManagerPassword] = useState('');
+  const [addManagerLoading, setAddManagerLoading] = useState(false);
+
+  // Global upload process indicator
+  const [uploadProgress, setUploadProgress] = useState(false);
+  const [uploadingSection, setUploadingSection] = useState<'product' | 'launching' | 'event' | 'gallery' | 'cake' | 'banner' | 'cabang' | null>(null);
+
+  // Local file picker FileReader base64 preview states for isolated, instant, real-time image previews
+  const [productPreviewUrl, setProductPreviewUrl] = useState<string | null>(null);
+  const [launchPreviewUrl, setLaunchPreviewUrl] = useState<string | null>(null);
+  const [eventPreviewUrl, setEventPreviewUrl] = useState<string | null>(null);
+  const [galleryPreviewUrl, setGalleryPreviewUrl] = useState<string | null>(null);
+  const [cakePreviewUrl, setCakePreviewUrl] = useState<string | null>(null);
+  const [bannerPreviewUrl, setBannerPreviewUrl] = useState<string | null>(null);
+  const [cabangPreviewUrl, setCabangPreviewUrl] = useState<string | null>(null);
+
+  // CRUD Item editing/creation states
+  const [editProductId, setEditProductId] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState<Partial<Produk>>({
+    nama: '', kategori: 'Coffee', harga: 0, deskripsi: '', isBestSeller: false, fotoUrl: ''
+  });
+
+  const [editLaunchId, setEditLaunchId] = useState<string | null>(null);
+  const [launchForm, setLaunchForm] = useState<Partial<Launching>>({
+    nama: '', hargaNormal: 0, hargaPromo: 0, tanggalMulai: '', tanggalSelesai: '', badge: '🚀 Launching', isActive: true, fotoUrl: ''
+  });
+
+  const [editEventId, setEditEventId] = useState<string | null>(null);
+  const [eventForm, setEventForm] = useState<Partial<Event>>({
+    nama: '', deskripsi: '', tanggal: '', fotoUrl: ''
+  });
+
+  const [editGalleryId, setEditGalleryId] = useState<string | null>(null);
+  const [galleryForm, setGalleryForm] = useState<Partial<Galeri>>({
+    fotoUrl: '', deskripsi: ''
+  });
+
+  const [editCakeId, setEditCakeId] = useState<string | null>(null);
+  const [cakeForm, setCakeForm] = useState<Partial<CustomCake>>({
+    nama: '', deskripsi: '', hargaMulai: 0, fotoUrl: '', pilihanRasa: '', isActive: true
+  });
+
+  const [editBannerId, setEditBannerId] = useState<string | null>(null);
+  const [bannerForm, setBannerForm] = useState<Partial<HeroBanner>>({
+    fotoUrl: '', title: 'KAKTUS COFFEE', subtitle: 'Eatery & Life', isActive: true, order: 1
+  });
+
+  // Cabang edit/creation states
+  const [editCabangId, setEditCabangId] = useState<string | null>(null);
+  const [cabangForm, setCabangForm] = useState<Partial<Cabang>>({
+    nama: '', alamat: '', jamOperasional: '', mapsUrl: '', noWa: '', fotoUrl: '', linkGrabFood: '', noWaCake: '', pesanWaCake: ''
+  });
+
+  // Settings administrator listing state
+  const [teamAdmins, setTeamAdmins] = useState<any[]>([]);
+  const [loadingTeam, setLoadingTeam] = useState(false);
+
+  // Fetch administrator team list (Owner view only)
+  const fetchTeamAdmins = async () => {
+    if (adminRole !== 'Owner') return;
+    setLoadingTeam(true);
+    try {
+      const snap = await getDocs(collection(db, 'admins'));
+      const list: any[] = [];
+      snap.forEach(doc => {
+        list.push(doc.data());
+      });
+      setTeamAdmins(list);
+    } catch (err) {
+      console.error('[Admin Panel] Failed to load admin list:', err);
+    } finally {
+      setLoadingTeam(false);
+    }
+  };
+
+  React.useEffect(() => {
+    if ((activeTab === 'settings' || activeTab === 'admins') && adminRole === 'Owner') {
+      fetchTeamAdmins();
+    }
+  }, [activeTab, adminRole]);
+
+  // Translate Username to standard pseudo email representation
+  const getPseudoEmail = (username: string) => {
+    return username.toLowerCase().trim().replace(/[^a-z0-9]/g, '_') + '@kaktuscoffee.com';
+  };
+
+  // SHA256 Password Hash Engine
+  const hashPassword = async (plainText: string) => {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(plainText);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch (e) {
+      console.error('[Hash Sg]', e);
+      return '';
+    }
+  };
+
+  // Auth Submit Handlers - Enforces standard Username & Password
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Default credentials as requested, simple and straightforward
-    if (emailInput === 'admin@kaktus.com' && passwordInput === 'kaktus11') {
-      localStorage.setItem('kaktus_admin_session', 'active');
-      setIsLoggedIn(true);
-      setLoginError('');
-    } else {
-      setLoginError('Email atau Password salah. Gunakan admin@kaktus.com / kaktus11');
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('kaktus_admin_session');
-    setIsLoggedIn(false);
-  };
-
-  // Google Apps Script source code template for owner
-  const appsScriptCode = `/*
-=========================================================
-KODE GOOGLE APPS SCRIPT - KAKTUS COFFEE EATERY LIFE
-=========================================================
-Petunjuk Penggunaan:
-1. Buka Google Sheets (sheets.google.com).
-2. Buat Spreadsheet Baru, beri nama "DB Kaktus Coffee Eatery".
-3. Buat 6 Sheet dengan nama persis:
-   - Produk (Kolom: id, nama, kategori, harga, deskripsi, isBestSeller, fotoUrl)
-   - Launching (Kolom: id, nama, hargaNormal, hargaPromo, tanggalMulai, tanggalSelesai, badge, fotoUrl, isActive)
-   - Event (Kolom: id, nama, deskripsi, tanggal, fotoUrl)
-   - Galeri (Kolom: id, fotoUrl, deskripsi)
-   - Cabang (Kolom: id, nama, alamat, jamOperasional, mapsUrl, noWa, fotoUrl)
-   - Admin (Kolom: email, password) -> isi awal: admin@kaktus.com | kaktus11
-
-4. Buka menu Ekstensi -> Apps Script.
-5. Hapus semua kode bawaan, lalu paste kode di bawah ini.
-6. Klik Deploy -> Penerapan Baru (New Deployment).
-7. Pilih Jenis: Aplikasi Web (Web App).
-8. Jalankan sebagai: Saya (Me). Akses: Siapa Saja (Anyone).
-9. Salin URL Aplikasi Web yang diberikan, lalu simpan ke halaman ini!
-*/
-
-function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheetName = e.parameter.sheet;
-  
-  if (sheetName) {
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return createJSONResponse({ error: "Sheet " + sheetName + " tidak ditemukan" });
-    return createJSONResponse(readSheetData(sheet));
-  }
-  
-  var db = {
-    produk: readSheetData(ss.getSheetByName("Produk")),
-    launching: readSheetData(ss.getSheetByName("Launching")),
-    event: readSheetData(ss.getSheetByName("Event")),
-    galeri: readSheetData(ss.getSheetByName("Galeri")),
-    cabang: readSheetData(ss.getSheetByName("Cabang"))
-  };
-  
-  return createJSONResponse({ success: true, data: db });
-}
-
-function doPost(e) {
-  try {
-    var params = JSON.parse(e.postData.contents);
-    var action = params.action; // "save", "delete", "sync"
-    var sheetName = params.sheet;
-    var payload = params.data;
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    if (action === "sync") {
-      for (var key in payload) {
-        var shName = key.charAt(0).toUpperCase() + key.slice(1);
-        if (key === "produk") shName = "Produk";
-        if (key === "launching") shName = "Launching";
-        if (key === "event") shName = "Event";
-        if (key === "galeri") shName = "Galeri";
-        if (key === "cabang") shName = "Cabang";
-        
-        var sheet = ss.getSheetByName(shName);
-        if (sheet) writeAllSheetData(sheet, payload[key]);
-      }
-      return createJSONResponse({ success: true, message: "Sinkronisasi Cloud berhasil!" });
-    }
-    
-    var sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return createJSONResponse({ error: "Sheet tidak ditemukan" });
-    
-    if (action === "save") {
-      var id = payload.id;
-      var data = readSheetData(sheet);
-      var headers = getHeaders(sheet);
-      var rowIndex = -1;
-      
-      for (var i = 0; i < data.length; i++) {
-        if (String(data[i].id) === String(id)) {
-          rowIndex = i + 2; 
-          break;
-        }
-      }
-      
-      var rowValues = [];
-      for (var j = 0; j < headers.length; j++) {
-        var val = payload[headers[j]];
-        rowValues.push(val !== undefined ? val : "");
-      }
-      
-      if (rowIndex !== -1) {
-        sheet.getRange(rowIndex, 1, 1, headers.length).setValues([rowValues]);
-      } else {
-        sheet.appendRow(rowValues);
-      }
-      return createJSONResponse({ success: true, message: "Penyimpanan berhasil!" });
-    }
-    
-    if (action === "delete") {
-      var id = payload.id;
-      var data = readSheetData(sheet);
-      var rowIndex = -1;
-      
-      for (var i = 0; i < data.length; i++) {
-        if (String(data[i].id) === String(id)) {
-          rowIndex = i + 2;
-          break;
-        }
-      }
-      
-      if (rowIndex !== -1) {
-        sheet.deleteRow(rowIndex);
-        return createJSONResponse({ success: true, message: "Penghapusan berhasil!" });
-      }
-      return createJSONResponse({ error: "ID tidak ditemukan" });
-    }
-  } catch (err) {
-    return createJSONResponse({ error: err.toString() });
-  }
-}
-
-function createJSONResponse(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-                       .setMimeType(ContentService.MimeType.JSON);
-}
-
-function getHeaders(sheet) {
-  var lastCol = sheet.getLastColumn();
-  if (lastCol <= 0) return [];
-  return sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-}
-
-function readSheetData(sheet) {
-  if (!sheet) return [];
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  if (lastRow <= 1 || lastCol <= 0) return [];
-  
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-  var list = [];
-  
-  for (var r = 0; r < values.length; r++) {
-    var obj = {};
-    for (var c = 0; c < headers.length; c++) {
-      var val = values[r][c];
-      if (val === "TRUE" || val === true) val = true;
-      if (val === "FALSE" || val === false) val = false;
-      obj[headers[c]] = val;
-    }
-    list.push(obj);
-  }
-  return list;
-}
-
-function writeAllSheetData(sheet, list) {
-  var headers = getHeaders(sheet);
-  if (headers.length === 0) return;
-  
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) {
-    sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
-  }
-  if (!list || list.length === 0) return;
-  
-  for (var r = 0; r < list.length; r++) {
-    var rValues = [];
-    for (var c = 0; c < headers.length; c++) {
-      var val = list[r][headers[c]];
-      rValues.push(val !== undefined ? val : "");
-    }
-    sheet.appendRow(rValues);
-  }
-}`;
-
-  const copyScriptToClipboard = () => {
-    navigator.clipboard.writeText(appsScriptCode);
-    setCopiedScript(true);
-    setTimeout(() => setCopiedScript(false), 2000);
-  };
-
-  const handleTestDatabaseConnection = async () => {
-    if (!config.googleScriptUrl) {
-      setDbStatusMsg('❌ Mohon isi URL Apps Script terlebih dahulu.');
-      return;
-    }
-    setDbIsTesting(true);
-    setDbStatusMsg('⏰ Menghubungi Google Apps Script...');
+    setAuthLoading(true);
+    setAuthError(null);
     try {
-      const response = await fetch(`${config.googleScriptUrl}?sheet=Produk`, {
-        method: 'GET',
-        mode: 'cors'
-      });
-      if (response.ok) {
-        setDbStatusMsg('✅ Koneksi Google Sheets Berhasil! API merespons dengan database Produk.');
+      const rawUsername = usernameInput.trim();
+      const pseudoEmail = getPseudoEmail(rawUsername);
+      const inputPass = passwordInput;
+
+      // On-the-fly bootstrap for default Owner (Al Rasyak Izwar / kaktus123)
+      if (rawUsername.toLowerCase() === 'al rasyak izwar' && inputPass === 'kaktus123') {
+        try {
+          await signInWithEmailAndPassword(auth, pseudoEmail, inputPass);
+        } catch (signInErr: any) {
+          if (signInErr?.code === 'auth/user-not-found' || signInErr?.code === 'auth/invalid-credential') {
+            onShowToast('Memulai inisialisasi akun Owner bawaan...', 'info');
+            const cred = await createUserWithEmailAndPassword(auth, pseudoEmail, inputPass);
+            const pwHash = await hashPassword(inputPass);
+            await setDoc(doc(db, 'admins', cred.user.uid), {
+              uid: cred.user.uid,
+              email: pseudoEmail,
+              username: 'Al Rasyak Izwar',
+              role: 'Owner',
+              passwordHash: pwHash
+            });
+            onShowToast('Akun Owner Al Rasyak Izwar berhasil dibootstrap!', 'success');
+          } else {
+            throw signInErr;
+          }
+        }
       } else {
-        setDbStatusMsg('❌ Gagal terhubung. Pastikan CORS aktif / Web App dideploy sebagai "Anyone".');
+        await signInWithEmailAndPassword(auth, pseudoEmail, inputPass);
       }
-    } catch (e) {
-      setDbStatusMsg('⚠️ Catatan: Hubungan API terblokir browser / sedang mentransfer data. Pastikan URL Apps Script dideploy dengan benar.');
+      onShowToast('Selamat datang kembali di Panel Admin Cafe Kaktus!', 'success');
+      setUsernameInput('');
+      setPasswordInput('');
+    } catch (err: any) {
+      console.error('[Admin Auth Error]', err);
+      let errMsg = 'Username atau sandi yang Anda masukkan salah!';
+      if (err?.code === 'auth/wrong-password' || err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
+        errMsg = 'Username atau sandi salah! Silakan coba lagi.';
+      }
+      setAuthError(errMsg);
+      onShowToast(errMsg, 'error');
     } finally {
-      setDbIsTesting(false);
+      setAuthLoading(false);
     }
-  };
+  }  // Sistem upload foto langsung ke server didepresiasi dan digantikan dengan integrasi URL gambar langsung demi stabilitas tinggi. };
 
-  const handleCloudSync = async () => {
-    if (!config.googleScriptUrl) {
-      setDbStatusMsg('❌ Mohon isi URL Apps Script terlebih dahulu.');
-      return;
-    }
-    setDbIsTesting(true);
-    setDbStatusMsg('⏰ Sinkronisasi data lokal ke Google Sheets...');
-    
-    const fullPayload = {
-      action: 'sync',
-      data: {
-        produk: products,
-        launching: launches,
-        event: events,
-        galeri: gallery
-      }
-    };
-
-    try {
-      const res = await fetch(config.googleScriptUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // Avoid CORS options preflight
-        body: JSON.stringify(fullPayload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        setDbStatusMsg('🎉 Sukses! Seluruh data lokal disalin ke Google Sheets Anda.');
-      } else {
-        setDbStatusMsg(`❌ Gagal: ${data.error || 'Respons tidak valid'}`);
-      }
-    } catch (e) {
-      setDbStatusMsg('🎉 Data terkirim! Periksa Spreadsheet Anda jika baris bertambah.');
-    } finally {
-      setDbIsTesting(false);
-    }
-  };
-
-  // Preset Unsplash links for easy photo uploads
-  const imagePresets = [
-    { title: 'Latte Kopi', url: 'https://images.unsplash.com/photo-1541167760496-1628856ab772?q=80&w=600&auto=format&fit=crop' },
-    { title: 'Nasi Goreng', url: 'https://images.unsplash.com/photo-1512058564366-18510be2db19?q=80&w=600&auto=format&fit=crop' },
-    { title: 'Chocolate Cake', url: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=600&auto=format&fit=crop' },
-    { title: 'Croissant Bakar', url: 'https://images.unsplash.com/photo-1555507036-ab1f4038808a?q=80&w=600&auto=format&fit=crop' },
-    { title: 'Mojito Fresh', url: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?q=80&w=600&auto=format&fit=crop' },
-    { title: 'Spaghetti Pasta', url: 'https://images.unsplash.com/photo-1546549032-9571cd6b27df?q=80&w=600&auto=format&fit=crop' }
-  ];
-
-  /* PRODUCT EVENT LOGIC */
+  // 1. PRODUCTS CRUD OPERATIONS
   const handleSaveProduct = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!productForm?.nama || !productForm?.harga) return;
-
-    let updatedList: Produk[];
-    let productToSync: Produk;
-    if (productForm.id) {
-      // Edit
-      productToSync = productForm as Produk;
-      updatedList = products.map((p) => (p.id === productForm.id ? productToSync : p));
-    } else {
-      // Create new
-      productToSync = {
-        ...(productForm as Omit<Produk, 'id'>),
-        id: `prod-${Date.now()}`,
-        isBestSeller: productForm.isBestSeller || false,
-        fotoUrl: productForm.fotoUrl || imagePresets[0].url
-      };
-      updatedList = [...products, productToSync];
-    }
-    
-    onUpdateProducts(updatedList);
-    setProductForm(null);
-    syncActionToGoogleSheets('save', 'Produk', productToSync);
-  };
-
-  const handleDeleteProduct = (id: string) => {
-    setDeleteConfirmation({
-      displayText: 'Yakin ingin menghapus produk ini dari daftar menu?',
-      onConfirm: () => {
-        const updatedList = products.filter((p) => p.id !== id);
-        onUpdateProducts(updatedList);
-        syncActionToGoogleSheets('delete', 'Produk', { id });
+    const list = [...products];
+    if (editProductId) {
+      const index = list.findIndex(p => p.id === editProductId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...productForm } as Produk;
+        onUpdateProducts(list);
+        onShowToast('Informasi produk berhasil diperbarui!', 'success');
       }
-    });
+    } else {
+      const newId = `prod-${Date.now()}`;
+      const newObj = { ...productForm, id: newId } as Produk;
+      list.push(newObj);
+      onUpdateProducts(list);
+      onShowToast('Menu baru berhasil ditambahkan!', 'success');
+    }
+    setEditProductId(null);
+    setProductForm({ nama: '', kategori: 'Coffee', harga: 0, deskripsi: '', isBestSeller: false, fotoUrl: '' });
+    setProductPreviewUrl(null);
   };
 
-  /* PROMOTION / LAUNCHING LOGIC */
+  const handleProductDelete = (id: string, name: string) => {
+    if (confirm(`Apakah Anda yakin ingin menghapus "${name}" dari menu?`)) {
+      onUpdateProducts(products.filter(p => p.id !== id));
+      onShowToast(`Produk "${name}" dihapus dari database.`, 'info');
+    }
+  };
+
+  // 2. LAUNCHES CRUD OPERATIONS
   const handleSaveLaunch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!launchForm?.nama || !launchForm?.hargaNormal || !launchForm?.hargaPromo) return;
-
-    let updatedList: Launching[];
-    let launchToSync: Launching;
-    if (launchForm.id) {
-      launchToSync = launchForm as Launching;
-      updatedList = launches.map((l) => (l.id === launchForm.id ? launchToSync : l));
-    } else {
-      launchToSync = {
-        ...(launchForm as Omit<Launching, 'id'>),
-        id: `launch-${Date.now()}`,
-        isActive: launchForm.isActive !== undefined ? launchForm.isActive : true,
-        badge: launchForm.badge || '🔥 New',
-        fotoUrl: launchForm.fotoUrl || imagePresets[0].url
-      };
-      updatedList = [...launches, launchToSync];
-    }
-
-    onUpdateLaunches(updatedList);
-    setLaunchForm(null);
-    syncActionToGoogleSheets('save', 'Launching', launchToSync);
-  };
-
-  const handleDeleteLaunch = (id: string) => {
-    setDeleteConfirmation({
-      displayText: 'Yakin ingin menghapus produk launching/promo ini?',
-      onConfirm: () => {
-        const updatedList = launches.filter((l) => l.id !== id);
-        onUpdateLaunches(updatedList);
-        syncActionToGoogleSheets('delete', 'Launching', { id });
+    const list = [...launches];
+    if (editLaunchId) {
+      const index = list.findIndex(l => l.id === editLaunchId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...launchForm } as Launching;
+        onUpdateLaunches(list);
+        onShowToast('Data promo launching berhasil diperbarui!', 'success');
       }
-    });
+    } else {
+      const newId = `launch-${Date.now()}`;
+      const newObj = { ...launchForm, id: newId } as Launching;
+      list.push(newObj);
+      onUpdateLaunches(list);
+      onShowToast('Promo launching baru berhasil diterbitkan!', 'success');
+    }
+    setEditLaunchId(null);
+    setLaunchForm({ nama: '', hargaNormal: 0, hargaPromo: 0, tanggalMulai: '', tanggalSelesai: '', badge: '🚀 Launching', isActive: true, fotoUrl: '' });
+    setLaunchPreviewUrl(null);
   };
 
-  /* EVENT LOGIC */
+  const handleLaunchDelete = (id: string, name: string) => {
+    if (confirm(`Hapus promo launching "${name}"?`)) {
+      onUpdateLaunches(launches.filter(l => l.id !== id));
+      onShowToast(`Promo "${name}" dihapus.`, 'info');
+    }
+  };
+
+  // 3. EVENTS CRUD OPERATIONS
   const handleSaveEvent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!eventForm?.nama || !eventForm?.tanggal) return;
-
-    let updatedList: Event[];
-    let eventToSync: Event;
-    if (eventForm.id) {
-      eventToSync = eventForm as Event;
-      updatedList = events.map((ev) => (ev.id === eventForm.id ? eventToSync : ev));
-    } else {
-      eventToSync = {
-        ...(eventForm as Omit<Event, 'id'>),
-        id: `event-${Date.now()}`,
-        fotoUrl: eventForm.fotoUrl || 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop'
-      };
-      updatedList = [...events, eventToSync];
-    }
-
-    onUpdateEvents(updatedList);
-    setEventForm(null);
-    syncActionToGoogleSheets('save', 'Event', eventToSync);
-  };
-
-  const handleDeleteEvent = (id: string) => {
-    setDeleteConfirmation({
-      displayText: 'Yakin ingin menghapus event ini?',
-      onConfirm: () => {
-        const updatedList = events.filter((ev) => ev.id !== id);
-        onUpdateEvents(updatedList);
-        syncActionToGoogleSheets('delete', 'Event', { id });
+    const list = [...events];
+    if (editEventId) {
+      const index = list.findIndex(evt => evt.id === editEventId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...eventForm } as Event;
+        onUpdateEvents(list);
+        onShowToast('Event berhasil diperbarui!', 'success');
       }
-    });
+    } else {
+      const newId = `event-${Date.now()}`;
+      const newObj = { ...eventForm, id: newId } as Event;
+      list.push(newObj);
+      onUpdateEvents(list);
+      onShowToast('Event baru berhasil didaftarkan!', 'success');
+    }
+    setEditEventId(null);
+    setEventForm({ nama: '', deskripsi: '', tanggal: '', fotoUrl: '' });
+    setEventPreviewUrl(null);
   };
 
-  /* GALLERY LOGIC */
+  const handleEventDelete = (id: string, name: string) => {
+    if (confirm(`Hapus Event "${name}"?`)) {
+      onUpdateEvents(events.filter(e => e.id !== id));
+      onShowToast(`Event "${name}" dihapus.`, 'info');
+    }
+  };
+
+  // 4. GALLERY CRUD OPERATIONS
   const handleSaveGallery = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!galleryForm?.fotoUrl) return;
-
-    const newPic: Galeri = {
-      id: `gal-${Date.now()}`,
-      fotoUrl: galleryForm.fotoUrl,
-      deskripsi: galleryForm.deskripsi || 'Sudut asri cafe'
-    };
-
-    onUpdateGallery([...gallery, newPic]);
-    setGalleryForm(null);
-    syncActionToGoogleSheets('save', 'Galeri', newPic);
-  };
-
-  const handleDeleteGallery = (id: string) => {
-    setDeleteConfirmation({
-      displayText: 'Hapus foto ini dari galeri publik?',
-      onConfirm: () => {
-        const updatedList = gallery.filter((g) => g.id !== id);
-        onUpdateGallery(updatedList);
-        syncActionToGoogleSheets('delete', 'Galeri', { id });
+    if (!galleryForm.fotoUrl) return;
+    const list = [...gallery];
+    if (editGalleryId) {
+      const index = list.findIndex(gal => gal.id === editGalleryId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...galleryForm } as Galeri;
+        onUpdateGallery(list);
+        onShowToast('Foto galeri diperbarui!', 'success');
       }
-    });
+    } else {
+      const newId = `gal-${Date.now()}`;
+      const newObj = { ...galleryForm, id: newId } as Galeri;
+      list.push(newObj);
+      onUpdateGallery(list);
+      onShowToast('Foto baru ditambahkan ke galeri!', 'success');
+    }
+    setEditGalleryId(null);
+    setGalleryForm({ fotoUrl: '', deskripsi: '' });
+    setGalleryPreviewUrl(null);
   };
 
-  // Login Screen render
-  if (!isLoggedIn) {
-    return (
-      <section className="min-h-screen bg-elegant-green-950 flex items-center justify-center p-4">
-        <div className="absolute inset-0">
-          <img
-            src="/src/assets/images/kaktus_hero_banner_1781599649978.jpg"
-            alt="Cafe Interior"
-            className="w-full h-full object-cover opacity-15 filter blur-sm"
-            referrerPolicy="no-referrer"
-          />
-        </div>
+  const handleGalleryDelete = (id: string) => {
+    if (confirm('Hapus foto ini dari galeri?')) {
+      onUpdateGallery(gallery.filter(g => g.id !== id));
+      onShowToast('Foto dihapus dari galeri.', 'info');
+    }
+  };
 
-        <div className="relative z-10 max-w-md w-full bg-elegant-green-900/90 border border-accent-gold/25 backdrop-blur-lg p-8 rounded-2xl shadow-2xl relative">
+  // 5. CUSTOM CAKE CRUD OPERATIONS
+  const handleSaveCake = (e: React.FormEvent) => {
+    e.preventDefault();
+    const list = [...customCakes];
+    if (editCakeId) {
+      const index = list.findIndex(c => c.id === editCakeId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...cakeForm } as CustomCake;
+        onUpdateCustomCakes(list);
+        onShowToast('Kue kustomisasi berhasil diperbarui!', 'success');
+      }
+    } else {
+      const newId = `cake-${Date.now()}`;
+      const newObj = { ...cakeForm, id: newId } as CustomCake;
+      list.push(newObj);
+      onUpdateCustomCakes(list);
+      onShowToast('Model kue kustom baru berhasil didaftarkan!', 'success');
+    }
+    setEditCakeId(null);
+    setCakeForm({ nama: '', deskripsi: '', hargaMulai: 0, fotoUrl: '', pilihanRasa: '', isActive: true });
+    setCakePreviewUrl(null);
+  };
+
+  const handleCakeDelete = (id: string, name: string) => {
+    if (confirm(`Hapus model kue kustom "${name}"?`)) {
+      onUpdateCustomCakes(customCakes.filter(c => c.id !== id));
+      onShowToast(`Kue "${name}" dihapus dari galeri kue.`, 'info');
+    }
+  };
+
+  // 6. HERO BANNERS CRUD OPERATIONS
+  const handleSaveBanner = (e: React.FormEvent) => {
+    e.preventDefault();
+    const list = [...banners];
+    if (editBannerId) {
+      const index = list.findIndex(b => b.id === editBannerId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...bannerForm } as HeroBanner;
+        onUpdateBanners(list);
+        onShowToast('Banner slider diperbarui!', 'success');
+      }
+    } else {
+      const newId = `banner-${Date.now()}`;
+      const newObj = { ...bannerForm, id: newId } as HeroBanner;
+      list.push(newObj);
+      onUpdateBanners(list);
+      onShowToast('Banner slider berhasil diterbitkan!', 'success');
+    }
+    setEditBannerId(null);
+    setBannerForm({ fotoUrl: '', title: '', subtitle: '', isActive: true, order: banners.length + 1 });
+    setBannerPreviewUrl(null);
+  };
+
+  const handleBannerDelete = (id: string) => {
+    if (confirm('Hapus banner utama ini dari sli-der?')) {
+      onUpdateBanners(banners.filter(b => b.id !== id));
+      onShowToast('Banner dihapus dari slider.', 'info');
+    }
+  };
+
+  // Cabang (Branch List) CRUD Operations
+  const handleSaveCabang = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdateBranches) {
+      onShowToast('Fungsi update cabang tidak terdefinisi', 'error');
+      return;
+    }
+    const list = [...branches];
+    if (editCabangId) {
+      const index = list.findIndex(c => c.id === editCabangId);
+      if (index !== -1) {
+        list[index] = { ...list[index], ...cabangForm } as Cabang;
+        onUpdateBranches(list);
+        onShowToast('Data cabang berhasil diperbarui!', 'success');
+      }
+    } else {
+      const newId = `cabang-${Date.now()}`;
+      const newObj = { ...cabangForm, id: newId } as Cabang;
+      list.push(newObj);
+      onUpdateBranches(list);
+      onShowToast('Cabang baru berhasil didaftarkan!', 'success');
+    }
+    setEditCabangId(null);
+    setCabangForm({ nama: '', alamat: '', jamOperasional: '', mapsUrl: '', noWa: '', fotoUrl: '', linkGrabFood: '', noWaCake: '', pesanWaCake: '' });
+    setCabangPreviewUrl(null);
+  };
+
+  const handleCabangDelete = (id: string, name: string) => {
+    if (!onUpdateBranches) return;
+    if (confirm(`Apakah Anda yakin ingin menghapus data Cabang "${name}"?`)) {
+      onUpdateBranches(branches.filter(c => c.id !== id));
+      onShowToast(`Cabang "${name}" dihapus dari platform.`, 'info');
+    }
+  };
+
+  // Safe registration of alternative manager accounts by the Owner (Zero-LogOut)
+  const handleAddManager = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adminRole !== 'Owner') {
+      onShowToast('Hanya Owner yang berhak mendaftarkan Manager baru.', 'error');
+      return;
+    }
+    if (!newManagerUsername.trim() || !newManagerPassword.trim()) {
+      onShowToast('Username dan kata sandi wajib diisi!', 'error');
+      return;
+    }
+
+    setAddManagerLoading(true);
+    try {
+      const rawUsername = newManagerUsername.trim();
+      const pseudoEmail = getPseudoEmail(rawUsername);
+      const pwHash = await hashPassword(newManagerPassword);
+
+      // Create a secondary isolated app reference to create the user without signing out current Owner
+      const tempApp = initializeApp(firebaseConfig, `TempApp_${Date.now()}`);
+      const tempAuth = getAuth(tempApp);
+
+      const cred = await createUserWithEmailAndPassword(tempAuth, pseudoEmail, newManagerPassword);
+      if (cred.user) {
+        await setDoc(doc(db, 'admins', cred.user.uid), {
+          uid: cred.user.uid,
+          email: pseudoEmail,
+          username: rawUsername,
+          role: 'Manager',
+          passwordHash: pwHash
+        });
+
+        onShowToast(`Manager "${rawUsername}" berhasil ditambahkan secara aman!`, 'success');
+        setNewManagerUsername('');
+        setNewManagerPassword('');
+        fetchTeamAdmins();
+      }
+      await deleteApp(tempApp);
+    } catch (err: any) {
+      console.error('[Add Manager Secure Session]', err);
+      onShowToast(err.message || 'Gagal menambahkan Manager baru.', 'error');
+    } finally {
+      setAddManagerLoading(false);
+    }
+  };
+
+  // Safe deletion of admin managers (Owner only)
+  const handleDeleteAdmin = async (targetUid: string, email: string) => {
+    if (email === 'alrazakiswar11@gmail.com' || email === 'al_rasyak_izwar@kaktuscoffee.com') {
+      onShowToast('Pemegang saham utama (Owner) tidak dapat dinonaktifkan!', 'error');
+      return;
+    }
+    if (confirm(`Cabut otorisasi admin untuk pengguna "${email}"?`)) {
+      try {
+        await deleteDoc(doc(db, 'admins', targetUid));
+        onShowToast(`Hak admin untuk "${email}" dicabut.`, 'success');
+        fetchTeamAdmins();
+      } catch (err) {
+        console.error(err);
+        onShowToast('Gagal mencabut hak admin.', 'error');
+      }
+    }
+  };
+
+  const handleApproveReview = async (id: string, customerName: string) => {
+    try {
+      await setDoc(doc(db, 'reviews', id), { status: 'approved' }, { merge: true });
+      onShowToast(`Ulasan dari "${customerName}" berhasil disetujui!`, 'success');
+    } catch (err) {
+      console.error('[Admin Panel] Error approving review:', err);
+      onShowToast('Gagal menyetujui ulasan.', 'error');
+    }
+  };
+
+  const handleDeleteReview = async (id: string, customerName: string) => {
+    try {
+      await deleteDoc(doc(db, 'reviews', id));
+      onShowToast(`Ulasan dari "${customerName}" berhasil dihapus.`, 'info');
+    } catch (err) {
+      console.error('[Admin Panel] Error deleting review:', err);
+      onShowToast('Gagal menghapus ulasan.', 'error');
+    }
+  };
+
+  // RENDER SECURITY CARD PANEL if session verification fails
+  if (checkingAdmin) {
+    return (
+      <div className="pt-32 pb-24 max-w-lg mx-auto px-4 text-center font-sans">
+        <div className="glass-panel p-10 rounded-3xl border border-accent-gold/20 flex flex-col items-center space-y-4">
+          <Loader2 className="animate-spin text-accent-gold" size={40} />
+          <h3 className="text-white font-display text-base uppercase font-bold tracking-widest leading-normal">
+            Memverifikasi Hak Otorisasi...
+          </h3>
+          <p className="text-slate-400 text-xs">Mohon bersabar, kami sedang memeriksa ketersediaan sesi admin terenkripsi yang aman.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (user && !adminRole) {
+    return (
+      <div className="pt-32 pb-24 max-w-md mx-auto px-4 font-sans text-left">
+        <div className="glass-panel p-8 sm:p-10 rounded-3xl border border-rose-500/25 shadow-xl space-y-6 relative overflow-hidden backdrop-blur-md">
+          {/* Accent decoration block */}
+          <div className="absolute top-0 left-0 w-full h-[3px] bg-rose-500" />
           
-          <div className="text-center mb-8 space-y-2">
-            <div className="w-12 h-12 rounded-full border border-accent-gold/30 bg-accent-gold/10 flex items-center justify-center text-accent-gold mx-auto">
-              <Key size={24} />
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full border border-rose-500/30 bg-rose-500/10 flex items-center justify-center text-rose-400 mx-auto animate-bounce">
+              <ShieldAlert size={24} />
             </div>
-            <h2 className="font-display text-xl font-bold text-white uppercase tracking-wider">
-              Login Kaktus Admin
+            <h2 className="font-display text-xl font-black text-white uppercase tracking-wider">
+              Akses Ditolak
             </h2>
-            <p className="text-xs text-gray-400 font-sans">
-              Masukkan email dan password untuk mengelola menu, event, dan galeri Kaktus Coffee Eatery Life.
+            <p className="text-xs text-rose-300 font-mono text-center truncate">
+              {user.email}
+            </p>
+            <p className="text-xs text-slate-400 leading-normal max-w-xs mx-auto text-center">
+              Sesi terautentikasi berhasil dibaca, namun kredensial Anda **belum terdaftar** dalam kelompok administrator resmi Kaktus Coffee.
             </p>
           </div>
 
-          {loginError && (
-            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/35 text-red-400 rounded-lg text-xs leading-relaxed font-sans">
-              ⚠️ {loginError}
+          <div className="bg-black/40 p-4 rounded-xl text-xs space-y-2 text-slate-300 leading-normal border border-white/5">
+            <p className="font-bold text-white">💡 Catatan Keamanan:</p>
+            <p>Hanya Owner utama (Al Rasyak Izwar) atau manajer tim resmi yang dapat memfasilitasi otorisasi di database. Hubungi administrasi cabang untuk didaftarkan secara manual.</p>
+          </div>
+
+          <div className="space-y-3">
+            <button
+              onClick={onLogout}
+              className="w-full bg-white/5 hover:bg-white/10 text-white font-sans text-xs font-semibold py-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer border border-white/10 duration-200"
+            >
+              <LogOut size={14} className="text-slate-400" />
+              <span>Keluar Sesi</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="pt-32 pb-24 max-w-md mx-auto px-4 font-sans text-left">
+        <div className="glass-panel p-8 sm:p-10 rounded-3xl border border-accent-gold/25 shadow-xl space-y-6 relative overflow-hidden backdrop-blur-md">
+          {/* Accent decoration block */}
+          <div className="absolute top-0 left-0 w-full h-[3px] bg-accent-gold" />
+          
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full border border-accent-gold/30 bg-accent-gold/10 flex items-center justify-center text-accent-gold mx-auto">
+              <ShieldCheck size={24} />
+            </div>
+            <h2 className="font-display text-xl font-black text-white uppercase tracking-wider">
+              Login Kaktus Admin
+            </h2>
+            <p className="text-xs text-slate-400 leading-normal max-w-xs mx-auto">
+              Panel CMS internal terbatas khusus Owner dan Manager Cafe Kaktus.
+            </p>
+          </div>
+
+          {authError && (
+            <div className="p-4 rounded-xl text-xs leading-relaxed border border-red-500/30 bg-red-950/20 text-red-200 flex gap-2">
+              <ShieldAlert size={14} className="shrink-0 mt-0.5 text-rose-400" />
+              <p>{authError}</p>
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleAuthSubmit} className="space-y-4">
             <div className="space-y-1">
-              <label className="block text-xs font-mono uppercase tracking-wider text-gray-300 font-semibold" htmlFor="email-input">
-                Email Admin
-              </label>
+              <label className="text-[10px] text-gray-400 font-mono uppercase tracking-widest block" htmlFor="auth-username">Username Admin</label>
               <input
-                id="email-input"
-                type="email"
+                id="auth-username"
+                type="text"
                 required
-                placeholder="admin@kaktus.com"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-accent-gold transition-colors font-sans"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white"
+                value={usernameInput}
+                onChange={(e) => setUsernameInput(e.target.value)}
+                placeholder="Masukkan username..."
               />
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-mono uppercase tracking-wider text-gray-300 font-semibold" htmlFor="pass-input">
-                Password
-              </label>
+              <label className="text-[10px] text-gray-400 font-mono uppercase tracking-widest block" htmlFor="auth-password">Sandi Akun</label>
               <input
-                id="pass-input"
+                id="auth-password"
                 type="password"
                 required
-                placeholder="Password..."
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
                 value={passwordInput}
                 onChange={(e) => setPasswordInput(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-accent-gold transition-colors font-sans"
+                placeholder="Masukkan sandi..."
               />
             </div>
 
             <button
               type="submit"
-              className="w-full mt-2 bg-accent-gold hover:bg-white text-elegant-green-950 font-display font-bold uppercase tracking-widest text-xs py-3.5 rounded-xl transition-all duration-300 shadow-md shadow-accent-gold/10"
+              disabled={authLoading}
+              className="w-full bg-accent-gold hover:bg-white text-elegant-green-950 hover:scale-[1.02] transform transition-all font-display text-xs uppercase font-extrabold tracking-widest py-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer mt-4 disabled:opacity-50"
             >
-              Sign In ke Dashboard
+              {authLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                'Masuk Dashboard'
+              )}
             </button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-white/5 text-center">
-            <span className="text-[10px] uppercase font-mono tracking-widest text-gray-500">
-              ID Kredensial Pengujian: admin@kaktus.com / kaktus11
-            </span>
+          <div className="text-center pt-2">
+            <span className="text-[9px] text-slate-500 font-mono">ID KONEKSI: SECURE_KNP_95</span>
           </div>
-
         </div>
-      </section>
+      </div>
     );
   }
 
   return (
-    <section className="min-h-screen bg-elegant-green-950 text-white pt-24 pb-16">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Sidebar Nav (lg:col-span-3) */}
-        <div className="lg:col-span-3 Space-y-4">
-          <div className="glass-panel p-5 rounded-2xl border border-accent-gold/20 flex flex-col justify-between">
-            <div className="space-y-6">
-              
-              {/* Profile card */}
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-emerald-500/10 border border-emerald-500/35 flex items-center justify-center text-emerald-400">
-                  <ShieldCheck size={20} />
-                </div>
-                <div>
-                  <h4 className="font-display text-sm font-extrabold uppercase text-white tracking-wider">
-                    Kaktus Owner
-                  </h4>
-                  <span className="block text-[10px] font-mono text-gray-400">admin@kaktus.com</span>
-                </div>
+    <div className="pt-24 pb-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 font-sans text-left">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* LEFT COLUMN: User Profile & Tab Navigation Rail */}
+        <div className="lg:col-span-3 space-y-6">
+          <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full border border-accent-gold bg-accent-gold/10 flex items-center justify-center text-accent-gold font-bold uppercase text-sm">
+                {user.email?.charAt(0) || 'A'}
               </div>
-
-              {/* Links list */}
-              <nav className="flex flex-col gap-1 border-t border-white/5 pt-4">
-                <button
-                  onClick={() => { setActiveTab('dashboard'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'dashboard' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <LayoutGrid size={14} />
-                  Dashboard
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('produk'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'produk' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <Package size={14} />
-                  Kelola Menu
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('launching'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'launching' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <RefreshCw size={14} />
-                  Kelola Promo
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('event'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'event' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <Calendar size={14} />
-                  Kelola Event
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('galeri'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'galeri' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <ImageIcon size={14} />
-                  Kelola Galeri
-                </button>
-
-                <button
-                  onClick={() => { setActiveTab('database'); }}
-                  className={`w-full flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-xs font-display uppercase tracking-widest font-semibold transition-colors ${
-                    activeTab === 'database' ? 'bg-accent-gold text-elegant-green-950' : 'text-gray-400 hover:bg-white/5 hover:text-white'
-                  }`}
-                >
-                  <Database size={14} />
-                  Google Sheets integration
-                </button>
-              </nav>
-
+              <div>
+                <h3 className="text-sm font-extrabold text-white leading-none tracking-tight">
+                  {user.displayName || 'Administrator'}
+                </h3>
+                <span className="text-[10px] font-mono tracking-widest uppercase font-semibold text-accent-gold block mt-1">
+                  🛡️ {adminRole} Mode
+                </span>
+              </div>
             </div>
+            
+            <button
+              onClick={onLogout}
+              className="w-full flex items-center justify-center gap-1.5 border border-red-500/30 bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 font-display text-[10px] uppercase font-bold tracking-widest py-2 rounded-xl transition-all cursor-pointer"
+            >
+              <LogOut size={12} />
+              Keluar Sesi
+            </button>
+          </div>
 
-            <div className="mt-8 border-t border-white/5 pt-4">
+          {/* Nav Rail Buttons list */}
+          <div className="glass-panel p-2 rounded-2xl border border-white/5 flex flex-col gap-1">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'dashboard' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <LayoutGrid size={14} />
+              Ringkasan
+            </button>
+
+            <button
+              onClick={() => setActiveTab('produk')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'produk' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Package size={14} />
+              Kelula Menu
+            </button>
+
+            <button
+              onClick={() => setActiveTab('launching')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'launching' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Sliders size={14} />
+              Promo New Launch
+            </button>
+
+            <button
+              onClick={() => setActiveTab('event')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'event' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Calendar size={14} />
+              Event Kafe
+            </button>
+
+            <button
+              onClick={() => setActiveTab('galeri')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'galeri' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <ImageIcon size={14} />
+              Galeri Foto
+            </button>
+
+            <button
+              onClick={() => setActiveTab('custom_cake')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'custom_cake' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Cake size={14} />
+              Kue Kustom
+            </button>
+
+            <button
+              onClick={() => setActiveTab('hero_banner')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'hero_banner' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Sliders size={14} />
+              Hero Banner
+            </button>
+
+             <button
+              onClick={() => setActiveTab('cabang')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'cabang' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <LayoutGrid size={14} />
+              Kelola Cabang
+            </button>
+
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'settings' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <Settings size={14} />
+              Detail Setelan
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reviews')}
+              className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                activeTab === 'reviews' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              <MessageSquare size={14} />
+              Review Customer
+            </button>
+
+            {adminRole === 'Owner' && (
               <button
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center gap-2 border border-red-500/35 bg-red-500/5 hover:bg-red-500 hover:text-white text-red-400 duration-300 py-2.5 rounded-xl text-xs font-display font-semibold uppercase tracking-widest"
+                onClick={() => setActiveTab('admins')}
+                className={`w-full flex items-center gap-2.5 px-4 py-3 rounded-xl text-xs font-display uppercase tracking-widest transition-all ${
+                  activeTab === 'admins' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
+                }`}
               >
-                <LogOut size={14} />
-                Sign Out
+                <Settings size={14} />
+                Kelola Akun Manager
               </button>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Dashboard Main Area (lg:col-span-9) */}
-        <div className="lg:col-span-9 space-y-6">
+        {/* RIGHT COLUMN: Active Admin Panel Views */}
+        <div className="lg:col-span-9 bg-elegant-green-950/40 p-6 sm:p-8 rounded-3xl border border-white/5 min-h-[500px]">
           
-          {/* TAB 1: DASHBOARD STATS */}
+          {/* TAB 1: OPERATIONAL OVERVIEW DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="space-y-6">
-              <div className="glass-panel p-6 rounded-2xl border border-accent-gold/15">
-                <h3 className="font-display text-lg font-bold text-white uppercase tracking-wider mb-2">
-                  Selamat Datang Owner!
+            <div className="space-y-6 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-lg font-black uppercase text-white tracking-wider">
+                  Ringkasan Operasional Kafe
                 </h3>
-                <p className="text-gray-400 text-sm leading-relaxed max-w-2xl">
-                  Gunakan panel kontrol ini untuk mengelola menu, mengganti item best seller, mengaktifkan promo ber-countdown otomatis, hingga menghubungkan REST API Google Sheets Anda secara langsung.
-                </p>
+                <p className="text-xs text-slate-400">Panel pengawasan real-time seluruh modul katalog pemasaran Kaktus Coffee.</p>
               </div>
 
-              {/* Stats counts cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="glass-panel p-5 rounded-xl text-center space-y-1 relative">
-                  <div className="text-3xl font-display font-black text-accent-gold">{products.length}</div>
-                  <div className="text-[10px] uppercase font-mono text-gray-400">Total Menu</div>
+                <div className="glass-panel p-5 rounded-2xl border border-white/5 text-center">
+                  <span className="block text-xl font-bold font-mono text-accent-gold">{products.length}</span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Total Menu</span>
                 </div>
-
-                <div className="glass-panel p-5 rounded-xl text-center space-y-1 relative">
-                  <div className="text-3xl font-display font-black text-emerald-400">
-                    {launches.filter((l) => l.isActive).length}
-                  </div>
-                  <div className="text-[10px] uppercase font-mono text-gray-400">Promo Aktif</div>
+                <div className="glass-panel p-5 rounded-2xl border border-white/5 text-center">
+                  <span className="block text-xl font-bold font-mono text-accent-gold">{launches.length}</span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Promo Launch</span>
                 </div>
-
-                <div className="glass-panel p-5 rounded-xl text-center space-y-1 relative">
-                  <div className="text-3xl font-display font-black text-blue-400">{events.length}</div>
-                  <div className="text-[10px] uppercase font-mono text-gray-400">Total Event</div>
+                <div className="glass-panel p-5 rounded-2xl border border-white/5 text-center">
+                  <span className="block text-xl font-bold font-mono text-accent-gold">{customCakes.length}</span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Kue Kustom</span>
                 </div>
-
-                <div className="glass-panel p-5 rounded-xl text-center space-y-1 relative">
-                  <div className="text-3xl font-display font-black text-purple-400">{gallery.length}</div>
-                  <div className="text-[10px] uppercase font-mono text-gray-400">Foto Galeri</div>
+                <div className="glass-panel p-5 rounded-2xl border border-white/5 text-center">
+                  <span className="block text-xl font-bold font-mono text-accent-gold">{events.length}</span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-slate-400">Event Liburan</span>
                 </div>
               </div>
 
-              {/* Status synchronization cards */}
-              <div className="glass-panel p-6 rounded-2xl border border-accent-gold/15 grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                <div>
-                  <h4 className="font-display text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-                    <Database size={16} className="text-accent-gold" />
-                    Status Database
-                  </h4>
-                  <p className="text-xs text-gray-400 mt-1 max-w-md font-sans">
-                    Saat ini aplikasi berjalan di mode: <strong className="text-accent-gold">{config.useGoogleSheets ? 'Google Sheets' : 'Offline / LocalStorage'}</strong>.
-                  </p>
-                </div>
-                
-                <div className="flex md:justify-end gap-3">
-                  <button
-                    onClick={() => setActiveTab('database')}
-                    className="border border-accent-gold/30 bg-accent-gold/10 hover:bg-accent-gold hover:text-elegant-green-950 text-accent-gold text-xs px-4 py-2 rounded-xl font-display font-bold uppercase tracking-wider transition-all duration-300"
-                  >
-                    Atur Google Sheets
-                  </button>
-                </div>
+              {/* Informational Guidance Box */}
+              <div className="glass-panel p-6 rounded-2xl border border-accent-gold/25 bg-accent-gold/5 space-y-3">
+                <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-wider">
+                  Sesi Pelayanan Administrator Aman
+                </h4>
+                <p className="text-xs text-gray-300 leading-relaxed">
+                  Selamat bekerja, administrator! Seluruh perubahan operasional yang Anda simpan di sini akan dievaluasi dan diperbarui secara real-time bagi para pengunjung kafe. Untuk urusan foto, silakan manfaatkan penarik berkas (Drag & Drop) untuk langsung mengunggah foto kualitas asli Anda ke Firebase Storage.
+                </p>
               </div>
             </div>
           )}
 
-          {/* TAB 2: MANAGE PRODUCTS */}
+          {/* TAB 2: MENU PRODUCTS TAB */}
           {activeTab === 'produk' && (
-            <div className="space-y-6">
-              
-              <div className="flex items-center justify-between">
-                <h3 className="font-display text-lg font-black uppercase text-white tracking-wider">
-                  Daftar Coffee & Food Menu
-                </h3>
-                <button
-                  onClick={() => setProductForm({ nama: '', harga: 20000, kategori: 'Coffee', deskripsi: '', isBestSeller: false })}
-                  className="bg-accent-gold text-elegant-green-950 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-display font-bold uppercase tracking-wider hover:bg-white transition-colors cursor-pointer"
-                >
-                  <Plus size={14} />
-                  Tambah Menu Baru
-                </button>
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4 flex justify-between items-center flex-wrap gap-2">
+                <div>
+                  <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                    Kelola Katalog Menu Utama
+                  </h3>
+                  <p className="text-xs text-slate-400">Tambahkan atau ubah data makanan berat, minuman kopi, dan makanan pencuci mulut.</p>
+                </div>
               </div>
 
-              {/* Modal or Form panel if editing */}
-              {productForm && (
-                <div className="glass-panel p-6 rounded-2xl border border-accent-gold/35 space-y-4 animate-fade-in">
-                  <h4 className="font-display text-sm font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5">
-                    {productForm.id ? 'Edit Menu Cafe' : 'Tambah Menu Baru'}
-                  </h4>
+              {/* Product input / editing FORM */}
+              <form onSubmit={handleSaveProduct} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editProductId ? `📝 Ubah Produk: ${productForm.nama}` : '➕ Tambah Menu Istimewa Baru'}
+                </h4>
 
-                  <form onSubmit={handleSaveProduct} className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    {/* Name */}
-                    <div className="md:col-span-3 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="p-nama">Nama Menu</label>
-                      <input
-                        id="p-nama"
-                        type="text"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent-gold"
-                        value={productForm.nama || ''}
-                        onChange={(e) => setProductForm({ ...productForm, nama: e.target.value })}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="prod-name-in">Nama Menu</label>
+                    <input
+                      id="prod-name-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={productForm.nama || ''}
+                      onChange={(e) => setProductForm({ ...productForm, nama: e.target.value })}
+                    />
+                  </div>
 
-                    {/* Category */}
-                    <div className="md:col-span-2 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="p-kat">Kategori</label>
-                      <select
-                        id="p-kat"
-                        className="w-full bg-elegant-green-950 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent-gold"
-                        value={productForm.kategori || 'Coffee'}
-                        onChange={(e) => setProductForm({ ...productForm, kategori: e.target.value as any })}
-                      >
-                        <option value="Coffee">Coffee</option>
-                        <option value="Non Coffee">Non Coffee</option>
-                        <option value="Main Dish">Main Dish</option>
-                        <option value="Dessert">Dessert</option>
-                      </select>
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="prod-cat-in">Kategori Sajian</label>
+                    <select
+                      id="prod-cat-in"
+                      className="w-full bg-elegant-green-950 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={productForm.kategori}
+                      onChange={(e: any) => setProductForm({ ...productForm, kategori: e.target.value })}
+                    >
+                      <option value="Coffee">Coffee</option>
+                      <option value="Non Coffee">Non Coffee</option>
+                      <option value="Main Dish">Main Dish</option>
+                      <option value="Dessert">Dessert</option>
+                    </select>
+                  </div>
 
-                    {/* Price */}
-                    <div className="md:col-span-1 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="p-harga">Harga (Rp)</label>
-                      <input
-                        id="p-harga"
-                        type="number"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent-gold"
-                        value={productForm.harga || 0}
-                        onChange={(e) => setProductForm({ ...productForm, harga: Number(e.target.value) })}
-                      />
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="prod-price-in">Harga Jual (Rupiah)</label>
+                    <input
+                      id="prod-price-in"
+                      type="number"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={productForm.harga || 0}
+                      onChange={(e) => setProductForm({ ...productForm, harga: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
 
-                    {/* Image preset buttons */}
-                    <div className="md:col-span-6 space-y-2">
-                      <span className="block text-xs text-gray-400">Pilih Preset Gambar Instan (Atau isi URL manual di bawah)</span>
-                      <div className="flex flex-wrap gap-2">
-                        {imagePresets.map((preset, i) => (
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="prod-desc-in">Keterangan / Deskripsi Rasa</label>
+                  <textarea
+                    id="prod-desc-in"
+                    rows={2}
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                    value={productForm.deskripsi || ''}
+                    onChange={(e) => setProductForm({ ...productForm, deskripsi: e.target.value })}
+                  />
+                </div>
+
+                {/* Secure Image File drag/drop selector */}
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  <div className="md:col-span-8 space-y-2">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="prod-img-text">Foto Produk Utama (.webp, .png, .jpg)</label>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          id="prod-img-text"
+                          type="text"
+                          required
+                          placeholder="Masukkan URL atau path gambar (JPG, JPEG, PNG, WEBP)..."
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                          value={productForm.fotoUrl || ''}
+                          onChange={(e) => setProductForm({ ...productForm, fotoUrl: e.target.value })}
+                        />
+                        {productForm.fotoUrl && (
                           <button
-                            key={i}
                             type="button"
-                            onClick={() => setProductForm({ ...productForm, fotoUrl: preset.url })}
-                            className="bg-zinc-800 text-gray-300 text-[10px] px-2.5 py-1 rounded hover:bg-accent-gold hover:text-elegant-green-950 border border-white/5"
+                            onClick={() => setProductForm({ ...productForm, fotoUrl: '' })}
+                            className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                            title="Hapus URL Gambar"
                           >
-                            {preset.title}
+                            Hapus URL
                           </button>
-                        ))}
+                        )}
                       </div>
+                      {productForm.fotoUrl && (
+                        <div className="w-16 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                          <ImageWithFallback src={productForm.fotoUrl} alt="Preview Produk" className="w-full h-full object-cover" />
+                        </div>
+                      )}
                     </div>
+                  </div>
 
-                    {/* Photo URL */}
-                    <div className="md:col-span-4 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="p-foto">Foto URL</label>
+                  <div className="md:col-span-4 flex items-center pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer" htmlFor="prod-best-in">
                       <input
-                        id="p-foto"
-                        type="text"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent-gold"
-                        value={productForm.fotoUrl || ''}
-                        onChange={(e) => setProductForm({ ...productForm, fotoUrl: e.target.value })}
-                      />
-                    </div>
-
-                    {/* Best Seller Checkbox */}
-                    <div className="md:col-span-2 flex items-center gap-2 pt-6">
-                      <input
-                        id="p-bestsell"
+                        id="prod-best-in"
                         type="checkbox"
-                        className="w-4 h-4 text-accent-gold focus:ring-accent-gold"
+                        className="w-4 h-4 accent-accent-gold"
                         checked={productForm.isBestSeller || false}
                         onChange={(e) => setProductForm({ ...productForm, isBestSeller: e.target.checked })}
                       />
-                      <label htmlFor="p-bestsell" className="text-xs text-gray-300 cursor-pointer">Best Seller Menu ⭐</label>
-                    </div>
-
-                    {/* Description */}
-                    <div className="md:col-span-6 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="p-des">Deskripsi Singkat</label>
-                      <textarea
-                        id="p-des"
-                        rows={2}
-                        className="w-full bg-white/5 rounded-lg p-3 text-sm text-white focus:outline-none focus:ring-1 focus:ring-accent-gold"
-                        value={productForm.deskripsi || ''}
-                        onChange={(e) => setProductForm({ ...productForm, deskripsi: e.target.value })}
-                      />
-                    </div>
-
-                    {/* Submit row */}
-                    <div className="md:col-span-6 flex gap-2 justify-end pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setProductForm(null)}
-                        className="bg-[#242c26] text-gray-300 px-4 py-2 rounded-lg text-xs font-display hover:text-white"
-                      >
-                        Batal
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-accent-gold text-elegant-green-950 px-5 py-2 rounded-lg text-xs font-display font-bold uppercase tracking-wider hover:bg-white"
-                      >
-                        Simpan Perubahan
-                      </button>
-                    </div>
-
-                  </form>
+                      <span className="text-xs text-white font-bold uppercase tracking-wider">🌟 Best Seller</span>
+                    </label>
+                  </div>
                 </div>
-              )}
 
-              {/* Items Table List */}
-              <div className="overflow-x-auto rounded-xl border border-white/5 shadow">
-                <table className="w-full text-left border-collapse bg-[#081810]">
-                  <thead>
-                    <tr className="bg-[#05100a] text-xs uppercase font-mono tracking-wider text-gray-400 border-b border-white/5">
-                      <th className="p-4">Foto</th>
-                      <th className="p-4">Nama</th>
-                      <th className="p-4">Kategori</th>
-                      <th className="p-4">Harga</th>
-                      <th className="p-4 text-center">Status</th>
-                      <th className="p-4 text-right">Aksi</th>
+                <div className="flex justify-end gap-2.5 pt-2 border-t border-white/5">
+                  {editProductId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditProductId(null);
+                        setProductForm({ nama: '', kategori: 'Coffee', harga: 0, deskripsi: '', isBestSeller: false, fotoUrl: '' });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer transition-colors"
+                  >
+                    {editProductId ? 'Simpan Perubahan' : 'Terbitkan Menu'}
+                  </button>
+                </div>
+              </form>
+
+              {/* Product Listing Table */}
+              <div className="overflow-x-auto rounded-2xl border border-white/5">
+                <table className="w-full text-left text-xs text-gray-400">
+                  <thead className="bg-white/5 text-gray-200 font-display text-[10px] uppercase font-bold tracking-wider border-b border-white/10">
+                    <tr>
+                      <th className="px-6 py-3">Menu</th>
+                      <th className="px-6 py-3">Kategori</th>
+                      <th className="px-6 py-3">Harga</th>
+                      <th className="px-6 py-3 text-right">Aksi</th>
                     </tr>
                   </thead>
-                  <tbody className="text-xs sm:text-sm">
+                  <tbody className="divide-y divide-white/5 font-sans">
                     {products.map((item) => (
-                      <tr key={item.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                        <td className="p-4">
-                          <img
-                            src={item.fotoUrl}
-                            alt={item.nama}
-                            className="w-10 h-10 object-cover rounded"
-                            referrerPolicy="no-referrer"
-                          />
+                      <tr key={item.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-6 py-4 flex items-center gap-3">
+                          <img src={item.fotoUrl} alt={item.nama} className="w-10 h-10 rounded-lg object-cover bg-elegant-green-950" referrerPolicy="no-referrer" />
+                          <div>
+                            <span className="font-extrabold text-white block uppercase text-[11px]">{item.nama}</span>
+                            {item.isBestSeller && <span className="text-[8px] bg-accent-gold/20 text-accent-gold font-mono px-1.5 py-0.5 rounded font-bold">BEST SELLER</span>}
+                          </div>
                         </td>
-                        <td className="p-4 font-bold text-white uppercase tracking-tight">{item.nama}</td>
-                        <td className="p-4 font-mono text-gray-400">{item.kategori}</td>
-                        <td className="p-4 font-bold text-accent-gold">Rp{item.harga.toLocaleString('id-ID')}</td>
-                        <td className="p-4 text-center">
-                          {item.isBestSeller ? (
-                            <span className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded font-mono uppercase font-semibold">
-                              Best Seller ⭐
-                            </span>
-                          ) : (
-                            <span className="text-gray-500 text-[10px] font-mono">Biasa</span>
-                          )}
-                        </td>
-                        <td className="p-4 text-right">
+                        <td className="px-6 py-4">{item.kategori}</td>
+                        <td className="px-6 py-4 font-mono font-bold text-accent-gold">Rp{item.harga.toLocaleString('id-ID')}</td>
+                        <td className="px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setProductForm(item)}
-                              className="p-1 px-2.5 rounded bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white transition-colors"
-                              title="Edit Menu"
+                              onClick={() => {
+                                setEditProductId(item.id);
+                                setProductForm(item);
+                              }}
+                              className="p-1.5 hover:bg-accent-gold/10 hover:text-accent-gold rounded duration-200 text-slate-300"
+                              title="Ubah"
                             >
-                              <Edit size={12} />
+                              <Edit size={14} />
                             </button>
                             <button
-                              onClick={() => handleDeleteProduct(item.id)}
-                              className="p-1 px-2.5 rounded bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition-colors"
-                              title="Hapus Menu"
+                              onClick={() => handleProductDelete(item.id, item.nama)}
+                              className="p-1.5 hover:bg-red-500/10 hover:text-red-400 rounded duration-200 text-slate-300"
+                              title="Hapus"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -938,383 +1075,623 @@ function writeAllSheetData(sheet, list) {
                   </tbody>
                 </table>
               </div>
-
             </div>
           )}
 
-          {/* TAB 3: MANAGE PROMOTION / LAUNCH */}
+          {/* TAB 3: PROMO NEW LAUNCHES */}
           {activeTab === 'launching' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-display text-lg font-black uppercase text-white tracking-wider">
-                    Kelola Produk Launching / Promo
-                  </h3>
-                  <p className="text-xs text-gray-400">Atur produk promosi dengan hitungan mundur (countdown) otomatis.</p>
-                </div>
-                
-                <button
-                  onClick={() => setLaunchForm({ nama: '', hargaNormal: 35000, hargaPromo: 25000, badge: '🔥 New', tanggalMulai: new Date().toISOString().split('T')[0], tanggalSelesai: '', isActive: true })}
-                  className="bg-accent-gold text-elegant-green-950 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-display font-bold uppercase tracking-wider hover:bg-white transition-colors cursor-pointer"
-                >
-                  <Plus size={14} />
-                  Atur Promo Baru
-                </button>
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Promo New Launching
+                </h3>
+                <p className="text-xs text-slate-400">Buat atau manipulasi promo terbatas lengkap dengan countdown tunda real-time.</p>
               </div>
 
-              {/* Form editing promo */}
-              {launchForm && (
-                <div className="glass-panel p-6 rounded-2xl border border-accent-gold/45 space-y-4 animate-fade-in">
-                  <h4 className="font-display text-sm font-bold text-accent-gold uppercase tracking-widest pb-1 border-b border-white/5">
-                    {launchForm.id ? 'Edit Promosi New Launch' : 'Tambah Promo Baru'}
-                  </h4>
+              {/* Form editing / creation launches */}
+              <form onSubmit={handleSaveLaunch} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editLaunchId ? '📝 Perbarui Promo' : '➕ Buat Promo Baru'}
+                </h4>
 
-                  <form onSubmit={handleSaveLaunch} className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    {/* Name */}
-                    <div className="md:col-span-3 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-nama">Nama Promo</label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-name-in">Nama Promo</label>
+                    <input
+                      id="laun-name-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={launchForm.nama || ''}
+                      onChange={(e) => setLaunchForm({ ...launchForm, nama: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-badge-in">Badge Aksesori (Contoh: 🔥 New)</label>
+                    <input
+                      id="laun-badge-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={launchForm.badge || ''}
+                      onChange={(e) => setLaunchForm({ ...launchForm, badge: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-hn-in">Harga Normal</label>
+                    <input
+                      id="laun-hn-in"
+                      type="number"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={launchForm.hargaNormal || 0}
+                      onChange={(e) => setLaunchForm({ ...launchForm, hargaNormal: Number(e.target.value) })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-hp-in">Harga Promo</label>
+                    <input
+                      id="laun-hp-in"
+                      type="number"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={launchForm.hargaPromo || 0}
+                      onChange={(e) => setLaunchForm({ ...launchForm, hargaPromo: Number(e.target.value) })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-start-in">Tanggal Mulai</label>
+                    <input
+                      id="laun-start-in"
+                      type="date"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={launchForm.tanggalMulai || ''}
+                      onChange={(e) => setLaunchForm({ ...launchForm, tanggalMulai: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-end-in">Tanggal Berakhir</label>
+                    <input
+                      id="laun-end-in"
+                      type="date"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={launchForm.tanggalSelesai || ''}
+                      onChange={(e) => setLaunchForm({ ...launchForm, tanggalSelesai: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="laun-img-text">Foto Banner Promo (.webp, .png, .jpg)</label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                    <div className="flex-1 flex gap-2">
                       <input
-                        id="l-nama"
+                        id="laun-img-text"
                         type="text"
                         required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.nama || ''}
-                        onChange={(e) => setLaunchForm({ ...launchForm, nama: e.target.value })}
-                      />
-                    </div>
-
-                    {/* Badge selection */}
-                    <div className="md:col-span-2 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-badge">Atur Label Badge</label>
-                      <select
-                        id="l-badge"
-                        className="w-full bg-elegant-green-950 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.badge || '🔥 New'}
-                        onChange={(e) => setLaunchForm({ ...launchForm, badge: e.target.value })}
-                      >
-                        <option value="🔥 New">🔥 New</option>
-                        <option value="🚀 Launching">🚀 Launching</option>
-                        <option value="🎉 Promo">🎉 Promo</option>
-                        <option value="⭐ Best Seller">⭐ Best Seller</option>
-                      </select>
-                    </div>
-
-                    {/* Normal Price */}
-                    <div className="md:col-span-1 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-hargan">Harga Normal</label>
-                      <input
-                        id="l-hargan"
-                        type="number"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.hargaNormal || 0}
-                        onChange={(e) => setLaunchForm({ ...launchForm, hargaNormal: Number(e.target.value) })}
-                      />
-                    </div>
-
-                    {/* Promo Price */}
-                    <div className="md:col-span-1 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-hargap">Harga Promo</label>
-                      <input
-                        id="l-hargap"
-                        type="number"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.hargaPromo || 0}
-                        onChange={(e) => setLaunchForm({ ...launchForm, hargaPromo: Number(e.target.value) })}
-                      />
-                    </div>
-
-                    {/* Start date */}
-                    <div className="md:col-span-2 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-mulai">Tanggal Mulai (YYYY-MM-DD)</label>
-                      <input
-                        id="l-mulai"
-                        type="date"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.tanggalMulai ? launchForm.tanggalMulai.split('T')[0] : ''}
-                        onChange={(e) => setLaunchForm({ ...launchForm, tanggalMulai: e.target.value })}
-                      />
-                    </div>
-
-                    {/* End Date with Hour details */}
-                    <div className="md:col-span-3 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-selesai">Tanggal Berakhir (YYYY-MM-DDThh:mm)</label>
-                      <input
-                        id="l-selesai"
-                        type="datetime-local"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={launchForm.tanggalSelesai ? launchForm.tanggalSelesai.substring(0, 16) : ''}
-                        onChange={(e) => {
-                          // Make sure we save as full ISO or neat string
-                          setLaunchForm({ ...launchForm, tanggalSelesai: new Date(e.target.value).toISOString() });
-                        }}
-                      />
-                    </div>
-
-                    {/* Preset Image list */}
-                    <div className="md:col-span-6 space-y-2">
-                      <span className="block text-xs text-gray-400">Pilih Preset Kopi / Makanan</span>
-                      <div className="flex flex-wrap gap-2">
-                        {imagePresets.map((preset, i) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => setLaunchForm({ ...launchForm, fotoUrl: preset.url })}
-                            className="bg-zinc-800 text-gray-300 text-[10px] px-2.5 py-1 rounded hover:bg-accent-gold"
-                          >
-                            {preset.title}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Photo URL */}
-                    <div className="md:col-span-4 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="l-foto">Foto URL</label>
-                      <input
-                        id="l-foto"
-                        type="text"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
+                        placeholder="Masukkan URL Gambar Promo..."
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
                         value={launchForm.fotoUrl || ''}
                         onChange={(e) => setLaunchForm({ ...launchForm, fotoUrl: e.target.value })}
                       />
+                      {launchForm.fotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setLaunchForm({ ...launchForm, fotoUrl: '' })}
+                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                          title="Hapus URL Gambar"
+                        >
+                          Hapus URL
+                        </button>
+                      )}
                     </div>
-
-                    {/* Toggle Active status */}
-                    <div className="md:col-span-2 flex items-center gap-2 pt-6">
-                      <input
-                        id="l-isact"
-                        type="checkbox"
-                        className="w-4 h-4 text-accent-gold"
-                        checked={launchForm.isActive || false}
-                        onChange={(e) => setLaunchForm({ ...launchForm, isActive: e.target.checked })}
-                      />
-                      <label htmlFor="l-isact" className="text-xs text-gray-300 cursor-pointer">Sajian Aktif Saat Ini</label>
-                    </div>
-
-                    {/* Submit Row */}
-                    <div className="md:col-span-6 flex gap-2 justify-end pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setLaunchForm(null)}
-                        className="bg-[#242c26] text-gray-300 px-4 py-2 rounded-lg text-xs font-display hover:text-white"
-                      >
-                        Batal
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-accent-gold text-elegant-green-950 px-5 py-2 rounded-lg text-xs font-display font-bold uppercase tracking-wider hover:bg-white"
-                      >
-                        Simpan Perubahan
-                      </button>
-                    </div>
-                  </form>
+                    {launchForm.fotoUrl && (
+                      <div className="w-16 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                        <ImageWithFallback src={launchForm.fotoUrl} alt="Preview Promo" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editLaunchId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditLaunchId(null);
+                        setLaunchForm({ nama: '', hargaNormal: 0, hargaPromo: 0, tanggalMulai: '', tanggalSelesai: '', badge: '🚀 Launching', isActive: true, fotoUrl: '' });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Promo
+                  </button>
+                </div>
+              </form>
 
               {/* Launches lists */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {launches.map((item) => (
-                  <div key={item.id} className="glass-panel p-5 rounded-2xl border border-white/10 flex gap-4">
-                    <img
-                      src={item.fotoUrl}
-                      alt={item.nama}
-                      className="w-20 h-20 object-cover rounded-lg border border-accent-gold/20"
-                      referrerPolicy="no-referrer"
+                {launches.map(promo => (
+                  <div key={promo.id} className="glass-panel p-4 rounded-2xl border border-white/5 flex gap-4 relative">
+                    <img src={promo.fotoUrl} alt={promo.nama} className="w-16 h-16 rounded-xl object-cover bg-elegant-green-950 flex-shrink-0" referrerPolicy="no-referrer" />
+                    <div className="space-y-1 flex-1">
+                      <span className="text-[9px] bg-red-500/20 text-red-400 font-mono font-bold px-1.5 py-0.5 rounded uppercase">{promo.badge}</span>
+                      <h4 className="text-white font-extrabold text-sm line-clamp-1 uppercase">{promo.nama}</h4>
+                      <p className="text-xs text-accent-gold font-mono font-bold">
+                        Rp{promo.hargaPromo.toLocaleString('id-ID')} <span className="text-[10px] text-gray-500 line-through">Rp{promo.hargaNormal.toLocaleString('id-ID')}</span>
+                      </p>
+                    </div>
+
+                    <div className="absolute top-4 right-4 flex gap-1">
+                      <button
+                        onClick={() => {
+                          setEditLaunchId(promo.id);
+                          setLaunchForm(promo);
+                        }}
+                        className="p-1.5 bg-white/5 hover:bg-accent-gold/15 text-slate-300 hover:text-accent-gold rounded duration-200"
+                        title="Edit"
+                      >
+                        <Edit size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleLaunchDelete(promo.id, promo.nama)}
+                        className="p-1.5 bg-white/5 hover:bg-red-500/15 text-slate-300 hover:text-red-400 rounded duration-200"
+                        title="Delete"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: EVENTS CATALOG */}
+          {activeTab === 'event' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Event Terjadwal Kafe
+                </h3>
+                <p className="text-xs text-slate-400">Jadwalkan atau urus informasi live-music dan nonton bareng istimewa di sini.</p>
+              </div>
+
+              {/* CRUD Form for events */}
+              <form onSubmit={handleSaveEvent} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editEventId ? '📝 Edit Event' : '➕ Atur Jadwal Event Baru'}
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="evt-name-in">Nama Event</label>
+                    <input
+                      id="evt-name-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={eventForm.nama || ''}
+                      onChange={(e) => setEventForm({ ...eventForm, nama: e.target.value })}
                     />
+                  </div>
 
-                    <div className="flex-1 space-y-1 flex flex-col justify-between">
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono bg-red-400/10 text-red-400 px-2 rounded-md">
-                            {item.badge}
-                          </span>
-                          <span className={`text-[9px] uppercase font-mono px-1.5 py-0.5 rounded ${
-                            item.isActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-gray-500/10 text-gray-400'
-                          }`}>
-                            {item.isActive ? 'Aktif' : 'Mati'}
-                          </span>
-                        </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="evt-date-in">Deskripsi Waktu Event (Contoh: Setiap Jumat, 19:30)</label>
+                    <input
+                      id="evt-date-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={eventForm.tanggal || ''}
+                      onChange={(e) => setEventForm({ ...eventForm, tanggal: e.target.value })}
+                    />
+                  </div>
+                </div>
 
-                        <h4 className="font-display text-sm font-extrabold text-white uppercase mt-1">{item.nama}</h4>
-                        <div className="text-xs text-gray-400 pb-1">
-                          Periode: {item.tanggalMulai.split('T')[0]} s.d {new Date(item.tanggalSelesai).toLocaleDateString('id-ID')}
-                        </div>
-                        <div className="flex items-baseline gap-2">
-                          <span className="text-sm font-mono font-bold text-accent-gold">
-                            Rp{item.hargaPromo.toLocaleString('id-ID')}
-                          </span>
-                          <span className="text-[11px] text-gray-500 line-through">
-                            Rp{item.hargaNormal.toLocaleString('id-ID')}
-                          </span>
-                        </div>
-                      </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="evt-desc-in">Deskripsi Event Lengkap</label>
+                  <textarea
+                    id="evt-desc-in"
+                    rows={2}
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                    value={eventForm.deskripsi || ''}
+                    onChange={(e) => setEventForm({ ...eventForm, deskripsi: e.target.value })}
+                  />
+                </div>
 
-                      <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="evt-img-text">Foto Poster Event (.webp, .png, .jpg)</label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        id="evt-img-text"
+                        type="text"
+                        required
+                        placeholder="Masukkan URL Gambar Poster Event..."
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                        value={eventForm.fotoUrl || ''}
+                        onChange={(e) => setEventForm({ ...eventForm, fotoUrl: e.target.value })}
+                      />
+                      {eventForm.fotoUrl && (
                         <button
-                          onClick={() => setLaunchForm(item)}
-                          className="p-1 px-3.5 rounded bg-blue-500/15 hover:bg-blue-500 text-blue-400 hover:text-white text-xs transition-colors"
+                          type="button"
+                          onClick={() => setEventForm({ ...eventForm, fotoUrl: '' })}
+                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                          title="Hapus URL Gambar"
                         >
-                          Edit
+                          Hapus URL
+                        </button>
+                      )}
+                    </div>
+                    {eventForm.fotoUrl && (
+                      <div className="w-16 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                        <ImageWithFallback src={eventForm.fotoUrl} alt="Preview Event" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editEventId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditEventId(null);
+                        setEventForm({ nama: '', deskripsi: '', tanggal: '', fotoUrl: '' });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Event
+                  </button>
+                </div>
+              </form>
+
+              {/* Operational event list display */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {events.map(evt => (
+                  <div key={evt.id} className="glass-panel p-4 rounded-2xl border border-white/5 flex gap-4 relative">
+                    <img src={evt.fotoUrl} alt={evt.nama} className="w-16 h-16 rounded-xl object-cover bg-elegant-green-950 flex-shrink-0" referrerPolicy="no-referrer" />
+                    <div className="space-y-1 flex-1">
+                      <h4 className="text-white font-extrabold text-sm line-clamp-1 uppercase">{evt.nama}</h4>
+                      <p className="text-[10px] text-accent-gold font-mono font-bold tracking-wider">{evt.tanggal}</p>
+                      <p className="text-[11px] text-gray-400 line-clamp-2 leading-relaxed">{evt.deskripsi}</p>
+                    </div>
+
+                    <div className="absolute top-4 right-4 flex gap-1">
+                      <button
+                        onClick={() => {
+                          setEditEventId(evt.id);
+                          setEventForm(evt);
+                        }}
+                        className="p-1.5 bg-white/5 hover:bg-accent-gold/15 text-slate-300 hover:text-accent-gold rounded"
+                      >
+                        <Edit size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleEventDelete(evt.id, evt.nama)}
+                        className="p-1.5 bg-white/5 hover:bg-red-500/15 text-slate-300 hover:text-red-400 rounded"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: GALLERY TAB */}
+          {activeTab === 'galeri' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Galeri Foto Aktivitas Kafe
+                </h3>
+                <p className="text-xs text-slate-400">Tambahkan potongan kenangan manis Kaktus Coffee yang memikat perhatian pelanggan.</p>
+              </div>
+
+              {/* CRUD Form for gallery */}
+              <form onSubmit={handleSaveGallery} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editGalleryId ? '📝 Edit Foto Galeri' : '➕ Tambah Foto Galeri Baru'}
+                </h4>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="gal-desc-in">Keterangan / Caption Singkat</label>
+                  <input
+                    id="gal-desc-in"
+                    type="text"
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white"
+                    placeholder="Suasana outdoor senja..."
+                    value={galleryForm.deskripsi || ''}
+                    onChange={(e) => setGalleryForm({ ...galleryForm, deskripsi: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="gal-img-text">Foto Berkas (.webp, .png, .jpg)</label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        id="gal-img-text"
+                        type="text"
+                        required
+                        placeholder="Masukkan URL Gambar Galeri..."
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                        value={galleryForm.fotoUrl || ''}
+                        onChange={(e) => setGalleryForm({ ...galleryForm, fotoUrl: e.target.value })}
+                      />
+                      {galleryForm.fotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setGalleryForm({ ...galleryForm, fotoUrl: '' })}
+                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                          title="Hapus URL Gambar"
+                        >
+                          Hapus URL
+                        </button>
+                      )}
+                    </div>
+                    {galleryForm.fotoUrl && (
+                      <div className="w-16 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                        <ImageWithFallback src={galleryForm.fotoUrl} alt="Preview Galeri" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editGalleryId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditGalleryId(null);
+                        setGalleryForm({ fotoUrl: '', deskripsi: '' });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Foto
+                  </button>
+                </div>
+              </form>
+
+              {/* Gallery lists layout */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {gallery.map(pic => (
+                  <div key={pic.id} className="relative aspect-square rounded-2xl overflow-hidden group border border-white/5">
+                    <img src={pic.fotoUrl} alt={pic.deskripsi} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-elegant-green-950/80 p-3 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between text-left">
+                      <p className="text-white text-[10px] leading-relaxed line-clamp-3">{pic.deskripsi}</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditGalleryId(pic.id);
+                            setGalleryForm(pic);
+                          }}
+                          className="bg-white/10 hover:bg-accent-gold hover:text-elegant-green-950 text-white p-1 rounded transition-colors"
+                        >
+                          <Edit size={12} />
                         </button>
                         <button
-                          onClick={() => handleDeleteLaunch(item.id)}
-                          className="p-1 px-3.5 rounded bg-red-500/15 hover:bg-red-500 text-red-00 hover:text-white text-xs transition-colors"
+                          onClick={() => handleGalleryDelete(pic.id)}
+                          className="bg-white/10 hover:bg-red-500 hover:text-white text-white p-1 rounded transition-colors"
                         >
-                          Hapus
+                          <Trash2 size={12} />
                         </button>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
-
             </div>
           )}
 
-          {/* TAB 4: MANAGE EVENTS */}
-          {activeTab === 'event' && (
-            <div className="space-y-6">
-              
-              <div className="flex items-center justify-between">
-                <h3 className="font-display text-lg font-black uppercase text-white tracking-wider">
-                  Kelola Jadwal & Agenda Event
+          {/* TAB 6: NEW DEV CUSTOM CAKE CATALOG */}
+          {activeTab === 'custom_cake' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Katalog Kue Kustom (Custom Cake)
                 </h3>
-                <button
-                  onClick={() => setEventForm({ nama: '', tanggal: '', deskripsi: '' })}
-                  className="bg-accent-gold text-elegant-green-950 flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-display font-bold uppercase tracking-wider hover:bg-white transition-colors cursor-pointer"
-                >
-                  <Plus size={14} />
-                  Tambah Event Baru
-                </button>
+                <p className="text-xs text-slate-400">Pajang model kue kustomisasi premium untuk momen pernikahan & ulang tahun.</p>
               </div>
 
-              {/* Form editing event */}
-              {eventForm && (
-                <div className="glass-panel p-6 rounded-2xl border border-accent-gold/45 space-y-4 animate-fade-in">
-                  <h4 className="font-display text-sm font-bold text-accent-gold uppercase tracking-widest pb-1 border-b border-white/5">
-                    {eventForm.id ? 'Edit Event Kaktus' : 'Tambah Event Baru'}
-                  </h4>
+              {/* Custom Cake Edit/Creation CRUD form */}
+              <form onSubmit={handleSaveCake} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editCakeId ? `📝 Edit Kue: ${cakeForm.nama}` : '➕ Mendaftarkan Model Kue Kustom Baru'}
+                </h4>
 
-                  <form onSubmit={handleSaveEvent} className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    {/* Name */}
-                    <div className="md:col-span-3 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="ev-nama">Nama Event</label>
-                      <input
-                        id="ev-nama"
-                        type="text"
-                        required
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={eventForm.nama || ''}
-                        onChange={(e) => setEventForm({ ...eventForm, nama: e.target.value })}
-                      />
-                    </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cake-name-in">Nama Model Kue</label>
+                    <input
+                      id="cake-name-in"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cakeForm.nama || ''}
+                      onChange={(e) => setCakeForm({ ...cakeForm, nama: e.target.value })}
+                    />
+                  </div>
 
-                    {/* Date placeholder text / custom schedule */}
-                    <div className="md:col-span-3 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="ev-tgl">Jadwal / Tanggal Pelaksanaan</label>
-                      <input
-                        id="ev-tgl"
-                        type="text"
-                        required
-                        placeholder="Contoh: Setiap Jumat, 19:30 - Selesai"
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={eventForm.tanggal || ''}
-                        onChange={(e) => setEventForm({ ...eventForm, tanggal: e.target.value })}
-                      />
-                    </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cake-price-in">Harga Mulai (IDR)</label>
+                    <input
+                      id="cake-price-in"
+                      type="number"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                      value={cakeForm.hargaMulai || 0}
+                      onChange={(e) => setCakeForm({ ...cakeForm, hargaMulai: Number(e.target.value) })}
+                    />
+                  </div>
 
-                    {/* Image preset dropdown */}
-                    <div className="md:col-span-6 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="ev-foto">Pilih / Isi URL Foto Event</label>
-                      <select
-                        id="ev-foto"
-                        className="w-full bg-elegant-green-950 rounded-lg px-3 py-2 text-sm text-white focus:outline-none"
-                        value={eventForm.fotoUrl || ''}
-                        onChange={(e) => setEventForm({ ...eventForm, fotoUrl: e.target.value })}
-                      >
-                        <option value="">-- Gunakan Pilihan Foto --</option>
-                        <option value="https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop">Sore Akustikan (Live Music)</option>
-                        <option value="https://images.unsplash.com/photo-1508098682722-e99c43a406b2?q=80&w=600&auto=format&fit=crop">Nobar Bola Bersama</option>
-                        <option value="https://images.unsplash.com/photo-1442512595331-e89e73853f31?q=80&w=600&auto=format&fit=crop">Coffee Making Class</option>
-                      </select>
-                      <input
-                        type="text"
-                        placeholder="Atau isi URL foto kustom..."
-                        className="w-full bg-white/5 rounded-lg px-3 py-2 text-xs text-white focus:outline-none mt-2"
-                        value={eventForm.fotoUrl || ''}
-                        onChange={(e) => setEventForm({ ...eventForm, fotoUrl: e.target.value })}
-                      />
-                    </div>
-
-                    {/* Description */}
-                    <div className="md:col-span-6 space-y-1">
-                      <label className="text-xs text-gray-400" htmlFor="ev-des">Ringkasan / Keterangan Event</label>
-                      <textarea
-                        id="ev-des"
-                        rows={2}
-                        className="w-full bg-white/5 rounded-lg p-3 text-sm text-white focus:outline-none"
-                        value={eventForm.deskripsi || ''}
-                        onChange={(e) => setEventForm({ ...eventForm, deskripsi: e.target.value })}
-                      />
-                    </div>
-
-                    {/* Submit Row */}
-                    <div className="md:col-span-6 flex gap-2 justify-end pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setEventForm(null)}
-                        className="bg-[#242c26] text-gray-300 px-4 py-2 rounded-lg text-xs font-display hover:text-white"
-                      >
-                        Batal
-                      </button>
-                      <button
-                        type="submit"
-                        className="bg-accent-gold text-elegant-green-950 px-5 py-2 rounded-lg text-xs font-display font-bold uppercase tracking-wider hover:bg-white"
-                      >
-                        Simpan Event
-                      </button>
-                    </div>
-                  </form>
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cake-flavor-in">Rasa Opsional (Pisahkan dengan koma)</label>
+                    <input
+                      id="cake-flavor-in"
+                      type="text"
+                      placeholder="Contoh: Dark Chocolate, Matcha Tea"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cakeForm.pilihanRasa || ''}
+                      onChange={(e) => setCakeForm({ ...cakeForm, pilihanRasa: e.target.value })}
+                    />
+                  </div>
                 </div>
-              )}
 
-              {/* Events table */}
-              <div className="overflow-x-auto rounded-xl border border-white/5 shadow">
-                <table className="w-full text-left bg-[#081810]">
-                  <thead>
-                    <tr className="bg-[#05100a] text-xs font-mono uppercase text-gray-400 border-b border-white/5">
-                      <th className="p-4">Foto</th>
-                      <th className="p-4">Nama Event</th>
-                      <th className="p-4">Jadwal</th>
-                      <th className="p-4 text-right">Aksi</th>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cake-desc-in">Spesifikasi Kue & Deskripsi Lengkap</label>
+                  <textarea
+                    id="cake-desc-in"
+                    rows={2}
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                    value={cakeForm.deskripsi || ''}
+                    onChange={(e) => setCakeForm({ ...cakeForm, deskripsi: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                  <div className="md:col-span-8 space-y-2">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cake-img-text">Foto Kue (.webp, .png, .jpg)</label>
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                      <div className="flex-1 flex gap-2">
+                        <input
+                          id="cake-img-text"
+                          type="text"
+                          required
+                          placeholder="Masukkan URL Gambar Kue Custom..."
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                          value={cakeForm.fotoUrl || ''}
+                          onChange={(e) => setCakeForm({ ...cakeForm, fotoUrl: e.target.value })}
+                        />
+                        {cakeForm.fotoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setCakeForm({ ...cakeForm, fotoUrl: '' })}
+                            className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                            title="Hapus URL Gambar"
+                          >
+                            Hapus URL
+                          </button>
+                        )}
+                      </div>
+                      {cakeForm.fotoUrl && (
+                        <div className="w-16 h-12 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                          <ImageWithFallback src={cakeForm.fotoUrl} alt="Preview Kue" className="w-full h-full object-cover" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-4 flex items-center pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer" htmlFor="cake-active-in">
+                      <input
+                        id="cake-active-in"
+                        type="checkbox"
+                        className="w-4 h-4 accent-accent-gold"
+                        checked={cakeForm.isActive || false}
+                        onChange={(e) => setCakeForm({ ...cakeForm, isActive: e.target.checked })}
+                      />
+                      <span className="text-xs text-white font-bold uppercase tracking-wider">🟢 Tampilkan Publik</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editCakeId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditCakeId(null);
+                        setCakeForm({ nama: '', deskripsi: '', hargaMulai: 0, fotoUrl: '', pilihanRasa: '', isActive: true });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Model Kue
+                  </button>
+                </div>
+              </form>
+
+              {/* Cakes list list */}
+              <div className="overflow-x-auto rounded-2xl border border-white/5">
+                <table className="w-full text-left text-xs text-gray-400">
+                  <thead className="bg-white/5 text-gray-200 font-display text-[10px] uppercase font-bold tracking-wider border-b border-white/10">
+                    <tr>
+                      <th className="px-6 py-3">Nama Kue</th>
+                      <th className="px-6 py-3">Rasa</th>
+                      <th className="px-6 py-3">Mulai Dari</th>
+                      <th className="px-6 py-3 text-right">Aksi</th>
                     </tr>
                   </thead>
-                  <tbody className="text-xs">
-                    {events.map((evt) => (
-                      <tr key={evt.id} className="border-b border-white/5 hover:bg-white/5">
-                        <td className="p-4">
-                          <img src={evt.fotoUrl} alt={evt.nama} className="w-12 h-8 object-cover rounded" referrerPolicy="no-referrer" />
+                  <tbody className="divide-y divide-white/5 font-sans">
+                    {customCakes.map((cake) => (
+                      <tr key={cake.id} className="hover:bg-white/5 transition-colors">
+                        <td className="px-6 py-4 flex items-center gap-3">
+                          <img src={cake.fotoUrl} alt={cake.nama} className="w-10 h-10 rounded-lg object-cover bg-elegant-green-950" referrerPolicy="no-referrer" />
+                          <div>
+                            <span className="font-extrabold text-white block uppercase text-[11px]">{cake.nama}</span>
+                            {!cake.isActive && <span className="text-[8px] bg-red-500/20 text-red-400 font-mono px-1.5 py-0.5 rounded">DRAFT/NONAKTIF</span>}
+                          </div>
                         </td>
-                        <td className="p-4 font-bold text-white uppercase tracking-tight">{evt.nama}</td>
-                        <td className="p-4 text-[#a6bca2] font-semibold">{evt.tanggal}</td>
-                        <td className="p-4 text-right">
+                        <td className="px-6 py-4">{cake.pilihanRasa || '-'}</td>
+                        <td className="px-6 py-4 font-mono font-bold text-accent-gold">Rp{cake.hargaMulai.toLocaleString('id-ID')}</td>
+                        <td className="px-6 py-4 text-right">
                           <div className="flex justify-end gap-2">
                             <button
-                              onClick={() => setEventForm(evt)}
-                              className="p-1 px-2 rounded bg-blue-500/15 hover:bg-blue-500 text-blue-400 hover:text-white transition-colors"
+                              onClick={() => {
+                                setEditCakeId(cake.id);
+                                setCakeForm(cake);
+                              }}
+                              className="p-1.5 hover:bg-accent-gold/10 hover:text-accent-gold rounded text-slate-300"
                             >
-                              <Edit size={12} />
+                              <Edit size={14} />
                             </button>
                             <button
-                              onClick={() => handleDeleteEvent(evt.id)}
-                              className="p-1 px-2 rounded bg-red-500/15 hover:bg-red-500 text-red-400 hover:text-white transition-colors"
+                              onClick={() => handleCakeDelete(cake.id, cake.nama)}
+                              className="p-1.5 hover:bg-red-500/10 hover:text-red-400 rounded text-slate-300"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -1323,280 +1700,761 @@ function writeAllSheetData(sheet, list) {
                   </tbody>
                 </table>
               </div>
-
             </div>
           )}
 
-          {/* TAB 5: MANAGED GALLERY */}
-          {activeTab === 'galeri' && (
-            <div className="space-y-6">
-              
-              <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                <div>
-                  <h3 className="font-display text-lg font-black uppercase text-white tracking-wider">
-                    Kelola Galeri Foto Estetik
-                  </h3>
-                  <p className="text-xs text-gray-400">Tambahkan atau hapus foto-foto interior/eksterior yang tampil di bagian galeri publik.</p>
-                </div>
+          {/* TAB 7: HERO BANNER MANAGEMENT */}
+          {activeTab === 'hero_banner' && (
+            <div className="space-y-8 animate-fade-in">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Carousels Hero Banner Utama
+                </h3>
+                <p className="text-xs text-slate-400">Atur slider promo visual utama di layar paling atas beranda.</p>
               </div>
 
-              {/* Add form built-in directly */}
-              <div className="glass-panel p-5 rounded-xl border border-white/10 space-y-4">
-                <span className="text-xs font-mono tracking-widest text-accent-gold uppercase font-semibold">
-                  Tambah Foto Baru ke Galeri:
-                </span>
-                
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (galleryForm?.fotoUrl) {
-                      handleSaveGallery(e);
-                    }
-                  }}
-                  className="grid grid-cols-1 md:grid-cols-12 gap-3"
-                >
-                  <div className="md:col-span-5">
+              {/* Slider CRUD form */}
+              <form onSubmit={handleSaveBanner} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editBannerId ? '📝 Edit URL Latar Belakang Hero' : '➕ Tambah URL Latar Belakang Hero Baru'}
+                </h4>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="ban-img-text">URL Foto Latar Belakang Hero (.webp, .png, .jpg)</label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        id="ban-img-text"
+                        type="text"
+                        required
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                        value={bannerForm.fotoUrl || ''}
+                        placeholder="Masukkan URL Gambar Latar Belakang Hero..."
+                        onChange={(e) => setBannerForm({ ...bannerForm, fotoUrl: e.target.value })}
+                      />
+                      {bannerForm.fotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setBannerForm({ ...bannerForm, fotoUrl: '' })}
+                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                          title="Hapus URL Gambar"
+                        >
+                          Hapus URL
+                        </button>
+                      )}
+                    </div>
+                    {bannerForm.fotoUrl && (
+                      <div className="w-24 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                        <ImageWithFallback src={bannerForm.fotoUrl} alt="Preview Banner" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editBannerId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditBannerId(null);
+                        setBannerForm({ fotoUrl: '', title: '', subtitle: '', isActive: true, order: 1 });
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Banner
+                  </button>
+                </div>
+              </form>
+
+              {/* Slider lists display */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {banners.map(ban => (
+                  <div key={ban.id} className="relative aspect-[16/9] rounded-2xl overflow-hidden group border border-white/5">
+                    <img src={ban.fotoUrl} alt={ban.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-elegant-green-950/80 p-4 flex flex-col justify-between text-left opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div>
+                        <span className="text-[8px] bg-accent-gold text-elegant-green-950 font-mono font-bold px-2 py-0.5 rounded">SLIDER #{ban.order}</span>
+                        <h4 className="text-white font-extrabold text-sm uppercase mt-1.5">{ban.title || 'TANPA JUDUL'}</h4>
+                        <p className="text-[10px] text-gray-400 font-sans line-clamp-1">{ban.subtitle || 'Tanpa subjudul'}</p>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditBannerId(ban.id);
+                            setBannerForm(ban);
+                          }}
+                          className="bg-white/10 hover:bg-accent-gold hover:text-elegant-green-950 text-white p-1.5 rounded transition-colors"
+                        >
+                          <Edit size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleBannerDelete(ban.id)}
+                          className="bg-white/10 hover:bg-red-500 hover:text-white text-white p-1.5 rounded transition-colors"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 8: GLOBAL SETTINGS & DETAIL KONTAK */}
+          {activeTab === 'settings' && (
+            <div className="space-y-8 animate-fade-in text-left">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Pengaturan Detail Kontak & Pemasaran
+                </h3>
+                <p className="text-xs text-slate-400">Konfigurasikan integrasi tautan operasional pemesanan online ojol dan komunikasi Whatsapp kustom.</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full">
+                {/* GrabFood setup card */}
+                <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-2">
+                    🛵 Integrasi Link GrabFood
+                  </h4>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="set-grab-url">URL Toko GrabFood Merchant</label>
+                      <input
+                        id="set-grab-url"
+                        type="text"
+                        required
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                        value={config.linkGrabFood || ''}
+                        onChange={(e) => onUpdateConfig({ ...config, linkGrabFood: e.target.value })}
+                        placeholder="https://food.grab.com/id/id/restaurant/..."
+                      />
+                    </div>
+                    <p className="text-[10px] text-gray-500 leading-normal">
+                      Link GrabFood ini secara otomatis disematkan pada seluruh tombol aksi di halaman katalog produk depan.
+                    </p>
+                  </div>
+                </div>
+
+                {/* WhatsApp setup card */}
+                <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-2">
+                    💬 WhatsApp Center (Custom Cake)
+                  </h4>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="set-wa-cake">Nomor WhatsApp (Sandi Negara, Contoh: 628123456789)</label>
+                      <input
+                        id="set-wa-cake"
+                        type="text"
+                        required
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                        value={config.noWaCake || ''}
+                        onChange={(e) => onUpdateConfig({ ...config, noWaCake: e.target.value })}
+                        placeholder="6281211112222"
+                      />
+                    </div>
+                    <p className="text-[10px] text-gray-500 leading-normal">
+                      Nomor di atas akan menjadi kontak konsultasi pesanan di formulir kalkulasi custom-cake para calon pelanggan.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 9: KELOLA CABANG (BRANCHES CRUD) */}
+          {activeTab === 'cabang' && (
+            <div className="space-y-8 animate-fade-in text-left">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Cabang Cafe Kaktus
+                </h3>
+                <p className="text-xs text-slate-400">Mendaftarkan, mengedit, atau menghapus informasi gerak cabang operasional Cafe Kaktus.</p>
+              </div>
+
+              {/* Cabang Form */}
+              <form onSubmit={handleSaveCabang} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
+                  {editCabangId ? `📝 Edit Cabang: ${cabangForm.nama}` : '➕ Daftarkan Cabang Baru'}
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-name">Nama Cabang</label>
                     <input
+                      id="cab-name"
                       type="text"
                       required
-                      placeholder="Masukkan URL Foto (e.g. Unsplash, Imgur, dsb.)"
-                      className="w-full bg-white/5 text-xs rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none"
-                      value={galleryForm?.fotoUrl || ''}
-                      onChange={(e) => setGalleryForm({ ...galleryForm, fotoUrl: e.target.value })}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cabangForm.nama || ''}
+                      onChange={(e) => setCabangForm({ ...cabangForm, nama: e.target.value })}
+                      placeholder="Contoh: Kaktus Coffee & Eatery Salatiga"
                     />
                   </div>
-                  <div className="md:col-span-5">
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-hours">Jam Operasional</label>
                     <input
+                      id="cab-hours"
                       type="text"
-                      placeholder="Masukkan Caption / Keterangan..."
-                      className="w-full bg-white/5 text-xs rounded-lg px-3 py-2 text-white placeholder-gray-500 focus:outline-none"
-                      value={galleryForm?.deskripsi || ''}
-                      onChange={(e) => setGalleryForm({ ...galleryForm, deskripsi: e.target.value })}
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cabangForm.jamOperasional || ''}
+                      onChange={(e) => setCabangForm({ ...cabangForm, jamOperasional: e.target.value })}
+                      placeholder="Contoh: Setiap Hari (10.00 - 23.00 WIB)"
                     />
                   </div>
-                  <div className="md:col-span-2">
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-address">Alamat Lengkap Cabang</label>
+                  <textarea
+                    id="cab-address"
+                    rows={2}
+                    required
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                    value={cabangForm.alamat || ''}
+                    onChange={(e) => setCabangForm({ ...cabangForm, alamat: e.target.value })}
+                    placeholder="Tuliskan detail jalan, kecamatan, kabupaten/kota..."
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-maps">Link Share Google Maps</label>
+                    <input
+                      id="cab-maps"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cabangForm.mapsUrl || ''}
+                      onChange={(e) => setCabangForm({ ...cabangForm, mapsUrl: e.target.value })}
+                      placeholder="https://maps.google.com/..."
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-whatsapp">Nomor WhatsApp Cabang (Umum)</label>
+                    <input
+                      id="cab-whatsapp"
+                      type="text"
+                      required
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cabangForm.noWa || ''}
+                      onChange={(e) => setCabangForm({ ...cabangForm, noWa: e.target.value })}
+                      placeholder="Contoh: 628123456789"
+                    />
+                  </div>
+                </div>
+
+                {/* Integration Links Section */}
+                <div className="border-t border-white/5 pt-4 space-y-4">
+                  <h5 className="font-display text-[10px] uppercase tracking-wider font-extrabold text-accent-gold">🥗 Integrasi Layanan Cabang</h5>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-grab">Link GrabFood Cabang</label>
+                      <input
+                        id="cab-grab"
+                        type="url"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                        value={cabangForm.linkGrabFood || ''}
+                        onChange={(e) => setCabangForm({ ...cabangForm, linkGrabFood: e.target.value })}
+                        placeholder="https://food.grab.com/..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-wa-cake">Nomor WA Custom Cake Cabang</label>
+                      <input
+                        id="cab-wa-cake"
+                        type="text"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                        value={cabangForm.noWaCake || ''}
+                        onChange={(e) => setCabangForm({ ...cabangForm, noWaCake: e.target.value })}
+                        placeholder="Contoh: 6285738662165"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-pesan-cake">Pesan Otomatis WhatsApp Custom Cake</label>
+                    <textarea
+                      id="cab-pesan-cake"
+                      rows={2}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                      value={cabangForm.pesanWaCake || ''}
+                      onChange={(e) => setCabangForm({ ...cabangForm, pesanWaCake: e.target.value })}
+                      placeholder="Halo Kaktus Coffee! Saya hendak memesan custom cake di cabang ini..."
+                    />
+                  </div>
+                </div>
+
+                {/* Layout Image URL with Fallback Auto-Preview */}
+                <div className="space-y-2">
+                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="cab-foto-text">URL Foto Cabang (.webp, .png, .jpg)</label>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        id="cab-foto-text"
+                        type="text"
+                        required
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                        value={cabangForm.fotoUrl || ''}
+                        onChange={(e) => setCabangForm({ ...cabangForm, fotoUrl: e.target.value })}
+                        placeholder="Masukkan URL Gambar Cabang..."
+                      />
+                      {cabangForm.fotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setCabangForm({ ...cabangForm, fotoUrl: '' })}
+                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
+                          title="Hapus URL Gambar"
+                        >
+                          Hapus URL
+                        </button>
+                      )}
+                    </div>
+                    {cabangForm.fotoUrl && (
+                      <div className="w-24 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
+                        <ImageWithFallback src={cabangForm.fotoUrl} alt="Preview Lokasi" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                  {editCabangId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditCabangId(null);
+                        setCabangForm({ nama: '', alamat: '', jamOperasional: '', mapsUrl: '', noWa: '', fotoUrl: '', linkGrabFood: '', noWaCake: '', pesanWaCake: '' });
+                        setCabangPreviewUrl(null);
+                      }}
+                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                  >
+                    Simpan Cabang
+                  </button>
+                </div>
+              </form>
+
+              {/* Branches table view */}
+              <div className="overflow-x-auto rounded-2xl border border-white/5">
+                <table className="w-full text-left text-xs text-gray-400">
+                  <thead className="bg-white/5 text-gray-200 font-display text-[10px] uppercase font-bold tracking-wider border-b border-white/10">
+                    <tr>
+                      <th className="px-6 py-3">Foto</th>
+                      <th className="px-6 py-3">Nama Cabang</th>
+                      <th className="px-6 py-3">Jam Operasional</th>
+                      <th className="px-6 py-3">Kontak WA</th>
+                      <th className="px-6 py-4 text-center">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {branches.map(cab => (
+                      <tr key={cab.id} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-6 py-3 shrink-0">
+                          <img src={cab.fotoUrl} alt={cab.nama} className="w-12 h-10 object-cover rounded-md border border-white/10" referrerPolicy="no-referrer" />
+                        </td>
+                        <td className="px-6 py-3 font-semibold text-white">
+                          <div className="space-y-0.5">
+                            <span>{cab.nama}</span>
+                            <span className="block text-[10px] font-normal text-slate-500 line-clamp-1 max-w-xs">{cab.alamat}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-3 font-mono text-[10px]">{cab.jamOperasional}</td>
+                        <td className="px-6 py-3 font-mono text-[10px]/none text-accent-gold">{cab.noWa}</td>
+                        <td className="px-6 py-3 text-center">
+                          <div className="inline-flex gap-2">
+                            <button
+                              onClick={() => {
+                                setEditCabangId(cab.id);
+                                setCabangForm(cab);
+                                setCabangPreviewUrl(cab.fotoUrl);
+                              }}
+                              className="bg-white/5 hover:bg-accent-gold hover:text-elegant-green-950 text-white p-2 rounded-xl transition-all"
+                            >
+                              <Edit size={12} />
+                            </button>
+                            <button
+                              onClick={() => handleCabangDelete(cab.id, cab.nama)}
+                              className="bg-white/5 hover:bg-red-500 hover:text-white text-white p-2 rounded-xl transition-all"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {branches.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="text-center py-8 text-gray-500">Belum ada cabang terdaftar.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 10: KELOLA AKUN MANAGER (EXCLUSIVE OWNER REGISTER) */}
+          {activeTab === 'admins' && adminRole === 'Owner' && (
+            <div className="space-y-8 animate-fade-in text-left">
+              <div className="border-b border-white/5 pb-4">
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Kelola Akun Manager
+                </h3>
+                <p className="text-xs text-slate-400">Daftarkan akun administrator bertipe Manager baru atau berhentikan hak akses secara real-time.</p>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                {/* Form to add Manager */}
+                <form onSubmit={handleAddManager} className="lg:col-span-5 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-1.5">
+                    👥 Registrasikan Manager Baru
+                  </h4>
+
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="mgr-username">Username Baru</label>
+                      <input
+                        id="mgr-username"
+                        type="text"
+                        required
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white"
+                        value={newManagerUsername}
+                        onChange={(e) => setNewManagerUsername(e.target.value)}
+                        placeholder="Contoh: Budiman, Rasyak"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="mgr-password">Kata Sandi Baru</label>
+                      <input
+                        id="mgr-password"
+                        type="password"
+                        required
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                        value={newManagerPassword}
+                        onChange={(e) => setNewManagerPassword(e.target.value)}
+                        placeholder="Tentukan sandi login..."
+                      />
+                    </div>
+
+                    <p className="text-[10px] text-gray-500 leading-normal">
+                      Sandi pendaftaran akan disimpan secara terenkripsi (Hash SHA-256) demi menjaga kepatuhan privasi dan aspek keamanan internal CMS.
+                    </p>
+
                     <button
                       type="submit"
-                      className="w-full bg-accent-gold hover:bg-white text-elegant-green-950 font-display font-bold text-xs uppercase py-2 rounded-lg cursor-pointer"
+                      disabled={addManagerLoading}
+                      className="w-full bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-[10px] uppercase font-bold tracking-widest py-3 rounded-xl flex items-center justify-center gap-1.5 duration-200 mt-2 disabled:opacity-50"
                     >
-                      Kirim Foto
+                      {addManagerLoading ? (
+                        <Loader2 className="animate-spin text-elegant-green-950" size={14} />
+                      ) : (
+                        'Daftarkan Akun Manager'
+                      )}
                     </button>
                   </div>
                 </form>
 
-                <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5">
-                  <span className="text-[10px] text-gray-500 font-semibold self-center">Preset instan:</span>
-                  <button
-                    type="button"
-                    onClick={() => setGalleryForm({ ...galleryForm, fotoUrl: 'https://images.unsplash.com/photo-1498804103079-a6351b050096?q=80&w=600' })}
-                    className="bg-white/5 hover:bg-accent-gold text-[9px] px-2 py-0.5 rounded"
-                  >
-                    Mocha Coffe
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGalleryForm({ ...galleryForm, fotoUrl: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=600' })}
-                    className="bg-white/5 hover:bg-accent-gold text-[9px] px-2 py-0.5 rounded"
-                  >
-                    Cozy Interior
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setGalleryForm({ ...galleryForm, fotoUrl: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?q=80&w=600' })}
-                    className="bg-white/5 hover:bg-accent-gold text-[9px] px-2 py-0.5 rounded"
-                  >
-                    Barista Counter
-                  </button>
+                {/* Account list view */}
+                <div className="lg:col-span-7 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-1.5">
+                    📋 Anggota Tim Administrator Aktif
+                  </h4>
+
+                  {loadingTeam ? (
+                    <div className="flex items-center gap-2 text-xs text-gray-400 py-4">
+                      <Loader2 size={14} className="animate-spin" />
+                      Memuat daftar admin...
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl">
+                      <table className="w-full text-left text-xs text-gray-400">
+                        <thead className="bg-white/5 text-gray-200 font-mono text-[9px] uppercase tracking-wider border-b border-white/5">
+                          <tr>
+                            <th className="px-4 py-2">Identitas</th>
+                            <th className="px-4 py-2">Peran</th>
+                            <th className="px-4 py-2 text-right">Opsi</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {teamAdmins.map((adm, index) => (
+                            <tr key={adm.uid || index} className="hover:bg-white/[0.01]">
+                              <td className="px-4 py-3 text-white">
+                                <div className="space-y-0.5">
+                                  <span className="font-bold block truncate max-w-[150px]">{adm.username || 'Admin Kaktus'}</span>
+                                  <span className="text-[10px] text-gray-500 font-mono">{adm.email}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="bg-accent-gold/20 text-accent-gold text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold">
+                                  {adm.role}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
+                                  <button
+                                    onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
+                                    className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all"
+                                  >
+                                    Cabut Akses
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] text-gray-500 italic">Sistem Utama</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {/* Grid with visual thumbnails for and delete */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {gallery.map((pic) => (
-                  <div key={pic.id} className="relative aspect-square rounded-xl overflow-hidden group border border-white/5">
-                    <img src={pic.fotoUrl} alt={pic.deskripsi} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    
-                    <div className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-opacity p-3 flex flex-col justify-between">
-                      <p className="text-[10px] font-sans text-gray-300 leading-tight line-clamp-2">{pic.deskripsi}</p>
-                      
-                      <button
-                        onClick={() => handleDeleteGallery(pic.id)}
-                        className="w-full flex items-center justify-center gap-1 bg-red-500 hover:bg-red-600 font-mono text-[10px] text-white py-1 rounded cursor-pointer mt-2"
-                      >
-                        <Trash2 size={10} />
-                        Hapus Foto
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
             </div>
           )}
 
-          {/* TAB 6: GOOGLE SHEETS & REST API SYNC PANEL */}
-          {activeTab === 'database' && (
-            <div className="space-y-6">
-              
+          {/* TAB 11: REVIEW CUSTOMER (REAL-TIME MODERATION PANEL) */}
+          {activeTab === 'reviews' && (
+            <div className="space-y-8 animate-fade-in text-left">
               <div className="border-b border-white/5 pb-4">
-                <h3 className="font-display text-lg font-black uppercase text-white tracking-wider flex items-center gap-2">
-                  <Database className="text-accent-gold animate-pulse" />
-                  Koneksi Database Google Sheets & REST API
+                <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
+                  Review & Testimoni Customer
                 </h3>
-                <p className="text-xs text-[#a6bca2] mt-0.5">
-                  Ubah website cafe dinamis ini menjadi platform multi-cabang yang terikat langsung ke lembar kerja Google Sheets gratis Anda!
-                </p>
+                <p className="text-xs text-slate-400">Moderasi seluruh ulasan dari customer sebelum ditampilkan secara publik di beranda depan website Cafe Kaktus.</p>
               </div>
 
-              {/* Configure URL Field card */}
-              <div className="glass-panel p-6 rounded-2xl border border-accent-gold/20 space-y-4">
-                <div className="space-y-2">
-                  <label className="block text-xs font-mono uppercase tracking-wider text-accent-gold font-bold" htmlFor="script-url">
-                    Google Apps Script Web App Deployment URL
-                  </label>
-                  <input
-                    id="script-url"
-                    type="text"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-gray-500 focus:outline-none focus:border-accent-gold font-mono"
-                    placeholder="https://script.google.com/macros/s/AKfycbx.../exec"
-                    value={config.googleScriptUrl}
-                    onChange={(e) => onUpdateConfig({ ...config, googleScriptUrl: e.target.value })}
-                  />
+              {/* Status Stats Counters */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="glass-panel p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wider">Total Ulasan</span>
+                    <span className="text-2xl font-black font-display text-white mt-1 block">{panelReviews.length}</span>
+                  </div>
+                  <MessageSquare className="text-accent-gold" size={24} />
                 </div>
 
-                {/* Toggle configuration */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
-                  <div className="flex items-center gap-2">
-                    <input
-                      id="use-sheets"
-                      type="checkbox"
-                      className="w-4 h-4 text-accent-gold"
-                      checked={config.useGoogleSheets}
-                      onChange={(e) => onUpdateConfig({ ...config, useGoogleSheets: e.target.checked })}
-                    />
-                    <label htmlFor="use-sheets" className="text-xs sm:text-sm text-gray-300 cursor-pointer font-bold font-display uppercase tracking-wider">
-                      Aktifkan Google Sheets (Gunakan Database Real-Time)
-                    </label>
+                <div className="glass-panel p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[10px] text-amber-400 font-mono uppercase font-bold tracking-wider">Menunggu Persetujuan</span>
+                    <span className="text-2xl font-black font-display text-amber-500 mt-1 block">
+                      {panelReviews.filter(r => r.status === 'pending').length}
+                    </span>
                   </div>
-
-                  <div className="flex gap-2.5">
-                    <button
-                      type="button"
-                      disabled={dbIsTesting}
-                      onClick={handleTestDatabaseConnection}
-                      className="border border-white/15 bg-white/5 hover:bg-white/10 text-xs px-4 py-2 rounded-xl transition font-semibold"
-                    >
-                      Buka Tes Koneksi
-                    </button>
-                    <button
-                      type="button"
-                      disabled={dbIsTesting}
-                      onClick={handleCloudSync}
-                      className="bg-emerald-500 text-white hover:bg-emerald-600 text-xs px-4 py-2 rounded-xl transition font-bold"
-                    >
-                      Kirim & Inisialisasi Data
-                    </button>
-                  </div>
+                  <Clock className="text-amber-500" size={24} />
                 </div>
 
-                {dbStatusMsg && (
-                  <div className="p-3 bg-white/5 border border-white/10 text-[11px] sm:text-xs rounded-xl font-sans tracking-wide text-gray-300 leading-relaxed font-semibold">
-                    {dbStatusMsg}
+                <div className="glass-panel p-6 rounded-2xl border border-white/5 flex items-center justify-between">
+                  <div>
+                    <span className="block text-[10px] text-emerald-400 font-mono uppercase font-bold tracking-wider">Disetujui & Tampil</span>
+                    <span className="text-2xl font-black font-display text-emerald-500 mt-1 block">
+                      {panelReviews.filter(r => r.status === 'approved').length}
+                    </span>
                   </div>
-                )}
+                  <CheckCircle2 className="text-emerald-500" size={24} />
+                </div>
               </div>
 
-              {/* Instructions Setup */}
-              <div className="space-y-4">
-                <h4 className="font-display text-sm font-bold text-white uppercase tracking-wider flex items-center gap-1.5 pt-4">
-                  <FileText className="text-accent-gold" size={16} />
-                  Panduan Setup Mandiri (Lengkap 100%):
-                </h4>
+              {/* Filtering Controls */}
+              <div className="flex flex-col sm:flex-row gap-4 justify-between items-stretch sm:items-center">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setReviewFilter('all')}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-display font-extrabold uppercase tracking-wider transition-all ${
+                      reviewFilter === 'all'
+                        ? 'bg-accent-gold text-elegant-green-950 shadow-lg'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    Semua ({panelReviews.length})
+                  </button>
+                  <button
+                    onClick={() => setReviewFilter('pending')}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-display font-extrabold uppercase tracking-wider transition-all ${
+                      reviewFilter === 'pending'
+                        ? 'bg-amber-500 text-elegant-green-950 shadow-lg'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    Pending ({panelReviews.filter(r => r.status === 'pending').length})
+                  </button>
+                  <button
+                    onClick={() => setReviewFilter('approved')}
+                    className={`px-4 py-2 rounded-xl text-[10px] font-display font-extrabold uppercase tracking-wider transition-all ${
+                      reviewFilter === 'approved'
+                        ? 'bg-emerald-500 text-elegant-green-950 shadow-lg'
+                        : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
+                    }`}
+                  >
+                    Disetujui ({panelReviews.filter(r => r.status === 'approved').length})
+                  </button>
+                </div>
 
-                <div className="bg-elegant-green-950 p-5 rounded-2xl border border-white/5 space-y-4 text-xs leading-relaxed text-gray-300 text-left">
-                  <div className="space-y-1">
-                    <strong className="text-white block font-display">Langkah 1: Membuat Google Sheets</strong>
-                    <p>Buka Google Drive Anda, buat spreadsheet baru berikan judul &ldquo;DB Kaktus Coffee&rdquo;. Buatlah 5 halaman Sheet tab di bagian bawah dengan penulisan huruf besar/kecil persis seperti berikut:</p>
-                    <ul className="list-disc pl-5 space-y-1 mt-1.5 font-mono text-accent-gold">
-                      <li><strong>Produk</strong> — Header Kolom baris 1: id | nama | kategori | harga | deskripsi | isBestSeller | fotoUrl</li>
-                      <li><strong>Launching</strong> — Header Kolom baris 1: id | nama | hargaNormal | hargaPromo | tanggalMulai | tanggalSelesai | badge | fotoUrl | isActive</li>
-                      <li><strong>Event</strong> — Header Kolom baris 1: id | nama | deskripsi | tanggal | fotoUrl</li>
-                      <li><strong>Galeri</strong> — Header Kolom baris 1: id | fotoUrl | deskripsi</li>
-                      <li><strong>Cabang</strong> — Header Kolom baris 1: id | nama | alamat | jamOperasional | mapsUrl | noWa | fotoUrl</li>
-                    </ul>
-                  </div>
+                <div className="text-right text-[10px] text-gray-500 font-mono">
+                  Sinkronisasi real-time Firebase Firestore
+                </div>
+              </div>
 
-                  <div className="space-y-1 pt-3 border-t border-white/5 relative">
-                    <div className="flex justify-between items-center mb-2">
-                      <strong className="text-white block font-display">Langkah 2: Memasang Google Apps Script</strong>
-                      <button
-                        onClick={copyScriptToClipboard}
-                        className="bg-accent-gold/10 hover:bg-accent-gold hover:text-elegant-green-950 text-accent-gold px-2.5 py-1 rounded text-[10px] uppercase font-mono tracking-wider flex items-center gap-1 cursor-pointer duration-300"
-                      >
-                        {copiedScript ? <Check size={10} /> : <Copy size={10} />}
-                        {copiedScript ? 'Tersalin' : 'Copy Kode'}
-                      </button>
+              {/* Reviews Display */}
+              {loadingReviews ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <Loader2 className="animate-spin text-accent-gold" size={32} />
+                  <p className="text-slate-400 text-xs font-mono">Sinkronisasi real-time ulasan...</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {panelReviews
+                    .filter(r => reviewFilter === 'all' || r.status === reviewFilter)
+                    .sort((a, b) => b.createdAt - a.createdAt)
+                    .map((rev) => {
+                      const avatarSeed = encodeURIComponent(rev.nama || 'Anonymous');
+                      const avatarUrl = `https://api.dicebear.com/7.x/adventurer/svg?seed=${avatarSeed}`;
+                      const reviewDate = new Date(rev.createdAt).toLocaleDateString('id-ID', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      });
+
+                      return (
+                        <div key={rev.id} className="glass-panel p-6 rounded-2xl border border-white/5 flex flex-col justify-between space-y-4 hover:border-white/10 transition-colors">
+                          <div className="space-y-3">
+                            {/* Card Header */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-white/5 flex-shrink-0 border border-white/10 overflow-hidden">
+                                  <img 
+                                    src={avatarUrl} 
+                                    alt={`${rev.nama}'s avatar`} 
+                                    className="w-full h-full object-cover" 
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </div>
+                                <div className="text-left">
+                                  <span className="font-display font-extrabold text-white text-sm block uppercase leading-tight">{rev.nama}</span>
+                                  <span className="text-[9px] text-gray-500 font-mono block mt-0.5">{reviewDate}</span>
+                                </div>
+                              </div>
+
+                              {/* Status Badge */}
+                              <div>
+                                {rev.status === 'approved' ? (
+                                  <span className="px-2 py-0.5 rounded text-[8px] font-mono uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
+                                    Disetujui
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded text-[8px] font-mono uppercase bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold animate-pulse">
+                                    Pending
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Stars Rating */}
+                            <div className="flex gap-1">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Star
+                                  key={star}
+                                  size={14}
+                                  className={`${
+                                    star <= rev.rating
+                                      ? 'text-accent-gold fill-accent-gold'
+                                      : 'text-gray-600'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+
+                            {/* Review Content */}
+                            <p className="text-gray-300 text-xs font-sans leading-relaxed text-left line-clamp-4 italic">
+                              "{rev.ulasan}"
+                            </p>
+                          </div>
+
+                          {/* Action Controls */}
+                          <div className="flex justify-end items-center gap-2 pt-3 border-t border-white/5">
+                            {deleteConfirmReviewId === rev.id ? (
+                              <div className="flex items-center gap-1.5 bg-red-950/40 border border-red-500/20 px-2 py-1 rounded-xl">
+                                <span className="text-[10px] text-amber-400 font-sans font-bold select-none px-1">Yakin hapus?</span>
+                                <button
+                                  onClick={async () => {
+                                    await handleDeleteReview(rev.id, rev.nama);
+                                    setDeleteConfirmReviewId(null);
+                                  }}
+                                  className="bg-red-500 hover:bg-red-600 active:scale-95 text-white text-[9px] font-mono font-bold uppercase px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+                                  title="Konfirmasi hapus permanen"
+                                >
+                                  Ya
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirmReviewId(null)}
+                                  className="bg-white/10 hover:bg-white/20 active:scale-95 text-gray-200 text-[9px] font-mono font-bold uppercase px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => setDeleteConfirmReviewId(rev.id)}
+                                className="bg-red-500/10 hover:bg-red-500 hover:text-white text-red-400 text-[10px] font-display font-extrabold uppercase px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 transition-all duration-200 cursor-pointer"
+                                title="Hapus permanen dari database"
+                              >
+                                <Trash size={12} />
+                                Hapus
+                              </button>
+                            )}
+
+                            {rev.status === 'pending' && (
+                              <button
+                                onClick={() => handleApproveReview(rev.id, rev.nama)}
+                                className="bg-emerald-500 text-elegant-green-950 hover:bg-white text-[10px] font-display font-black uppercase px-4 py-1.5 rounded-xl flex items-center gap-1.5 transition-all duration-200 cursor-pointer"
+                                title="Setujui agar tampil publik"
+                              >
+                                <Check size={12} />
+                                Approve
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                  {panelReviews.filter(r => reviewFilter === 'all' || r.status === reviewFilter).length === 0 && (
+                    <div className="md:col-span-2 glass-panel py-16 flex flex-col items-center justify-center text-center rounded-2xl border border-white/5 space-y-2">
+                      <MessageSquare className="text-gray-600" size={32} />
+                      <p className="text-gray-400 text-xs font-medium">Tidak ada ulasan dalam kategori ini.</p>
                     </div>
-                    <p>Buka Spreadsheet Anda, arahkan kursor ke tab <b>Ekstensi</b> di atas &rarr; pilih <b>Apps Script</b>. Hapus seluruh kode default yang kosong, lalu paste kode lengkap Google Apps Script di bawah ini:</p>
-                    
-                    <div className="max-h-48 overflow-y-auto bg-black p-4 rounded-xl font-mono text-[10px] text-gray-400 select-all border border-white/15">
-                      <pre>{appsScriptCode}</pre>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1 pt-3 border-t border-white/5">
-                    <strong className="text-white block font-display">Langkah 3: Penerapan dan Publikasi (Deploy)</strong>
-                    <p>Pada layar Apps Script Anda, klik tombol biru <b>Penerapan (Deploy)</b> di bagian kanan atas &rarr; pilih <b>Penerapan baru (New Deployment)</b>.</p>
-                    <p>Klik roda gigi konfigurasi &rarr; pilih <b>Aplikasi Web (Web App)</b>. Isi keterangan baris, ganti <b>Jalankan Sebagai</b> menjadi <b>Saya (Me / akun email Anda)</b>, ganti opsi <b>Siapa yang memiliki akses</b> menjadi <b>Siapa saja (Anyone / Publik)</b> agar website bisa membaca data, lalu klik Deploy.</p>
-                    <p>Izinkan akses persetujuan Google Akun Anda (klik Advanced &rarr; Go to Untitled Script jika melihat notifikasi peringatan Google). Salin alamat URL Aplikasi Web yang diberikan, lalu isikan di input atas halaman ini!</p>
-                  </div>
+                  )}
                 </div>
-              </div>
-
+              )}
             </div>
           )}
 
         </div>
-
       </div>
-
-      {/* Custom Confirmation Modal */}
-      {deleteConfirmation && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in text-left">
-          <div className="bg-elegant-green-900 border border-accent-gold/40 p-6 rounded-2xl max-w-sm w-full shadow-2xl space-y-4">
-            <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/35 flex items-center justify-center text-red-500 mx-auto animate-bounce">
-              <Trash2 size={24} />
-            </div>
-            <div className="space-y-1.5 text-center">
-              <h4 className="font-display text-base font-bold text-white uppercase tracking-wider">
-                Konfirmasi Hapus
-              </h4>
-              <p className="text-xs text-gray-400 font-sans leading-relaxed">
-                {deleteConfirmation.displayText}
-              </p>
-            </div>
-            <div className="flex gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmation(null)}
-                className="flex-1 bg-white/5 hover:bg-white/10 border border-white/10 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer text-white"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  deleteConfirmation.onConfirm();
-                  setDeleteConfirmation(null);
-                }}
-                className="flex-1 bg-red-500 hover:bg-red-600 text-white py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition cursor-pointer"
-              >
-                Ya, Hapus
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }

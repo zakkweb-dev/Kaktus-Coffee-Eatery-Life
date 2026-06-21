@@ -1,28 +1,29 @@
 import { useEffect, useState } from 'react';
-import { Calendar, ShoppingBag, Flame } from 'lucide-react';
+import { Calendar, Flame, MessageCircle, ExternalLink } from 'lucide-react';
 import { Launching } from '../types';
 
 interface NewLaunchProps {
   launches: Launching[];
+  linkGrabFood?: string;
+  onOrderGrabFood?: () => void;
 }
 
-export default function NewLaunch({ launches }: NewLaunchProps) {
+export default function NewLaunch({ launches, linkGrabFood, onOrderGrabFood }: NewLaunchProps) {
   // Find the first active promotional launch whose end date is in the future
   const activeLaunches = launches.filter(
     (l) => l.isActive && new Date(l.tanggalSelesai).getTime() > Date.now()
   );
 
   if (activeLaunches.length === 0) {
-    // If no promo launch is active, the section is automatically not displayed!
     return null;
   }
 
   const promo = activeLaunches[0];
 
-  return <LaunchItem promo={promo} />;
+  return <LaunchItem promo={promo} linkGrabFood={linkGrabFood} onOrderGrabFood={onOrderGrabFood} />;
 }
 
-function LaunchItem({ promo }: { promo: Launching }) {
+function LaunchItem({ promo, linkGrabFood, onOrderGrabFood }: { promo: Launching; linkGrabFood?: string; onOrderGrabFood?: () => void }) {
   const [timeLeft, setTimeLeft] = useState({
     hari: 0,
     jam: 0,
@@ -55,15 +56,25 @@ function LaunchItem({ promo }: { promo: Launching }) {
     return () => clearInterval(timer);
   }, [promo.tanggalSelesai]);
 
-  // If expired inside the running session, hide it
   if (timeLeft.isExpired) {
     return null;
   }
 
-  const waMessage = encodeURIComponent(
-    `Halo Kaktus Coffee! Saya tertarik memesan promo terbaru "${promo.nama}" seharga Rp${promo.hargaPromo.toLocaleString('id-ID')} (Harga normal Rp${promo.hargaNormal.toLocaleString('id-ID')}).`
-  );
-  const waUrl = `https://wa.me/6285738662165?text=${waMessage}`;
+  const handleOrderWa = () => {
+    const message = encodeURIComponent(
+      `Halo Kaktus Coffee! Saya tertarik memesan promo terbaru "${promo.nama}" seharga Rp${promo.hargaPromo.toLocaleString('id-ID')} (Harga normal Rp${promo.hargaNormal.toLocaleString('id-ID')}). Mohon infonya.`
+    );
+    window.open(`https://wa.me/6285738662165?text=${message}`, '_blank');
+  };
+
+  const handleGrabFood = () => {
+    if (onOrderGrabFood) {
+      onOrderGrabFood();
+    } else {
+      const url = linkGrabFood || 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8';
+      window.open(url, '_blank');
+    }
+  };
 
   return (
     <section id="promo" className="py-20 bg-elegant-green-900 relative overflow-hidden">
@@ -169,16 +180,21 @@ function LaunchItem({ promo }: { promo: Launching }) {
               </div>
             </div>
 
-            <div className="pt-2">
-              <a
-                href={waUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-display uppercase tracking-widest text-xs font-bold px-6 py-3.5 rounded-full transition-all duration-300 w-full sm:w-auto text-center"
+            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={handleOrderWa}
+                className="inline-flex items-center justify-center gap-2 bg-accent-gold hover:bg-white text-elegant-green-950 font-display uppercase tracking-widest text-xs font-bold px-6 py-3.5 rounded-full transition-all duration-300 w-full sm:w-auto text-center cursor-pointer shadow-lg shadow-accent-gold/15"
               >
-                <ShoppingBag size={14} />
-                Pesan Promo (Lewat WhatsApp)
-              </a>
+                <MessageCircle size={14} />
+                Pesan via WhatsApp
+              </button>
+              <button
+                onClick={handleGrabFood}
+                className="inline-flex items-center justify-center gap-2 bg-[#00B14F] hover:bg-emerald-500 text-white font-display uppercase tracking-widest text-xs font-bold px-6 py-3.5 rounded-full transition-all duration-300 w-full sm:w-auto text-center cursor-pointer shadow-lg shadow-emerald-500/15"
+              >
+                <ExternalLink size={14} />
+                Order via GrabFood
+              </button>
             </div>
           </div>
         </div>

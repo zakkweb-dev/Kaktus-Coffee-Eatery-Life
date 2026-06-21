@@ -1,12 +1,15 @@
 import { useState, useMemo } from 'react';
-import { Search, Coffee, Snowflake, Utensils, Cake, MessageCircle } from 'lucide-react';
+import { Search, Coffee, Snowflake, Utensils, Cake, MessageCircle, ExternalLink } from 'lucide-react';
 import { Produk } from '../types';
+import ImageWithFallback from './ImageWithFallback';
 
 interface MenuProps {
   products: Produk[];
+  linkGrabFood?: string;
+  onOrderGrabFood?: () => void;
 }
 
-export default function Menu({ products }: MenuProps) {
+export default function Menu({ products, linkGrabFood, onOrderGrabFood }: MenuProps) {
   const [activeCategory, setActiveCategory] = useState<'All' | 'Coffee' | 'Non Coffee' | 'Main Dish' | 'Dessert'>('All');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -31,9 +34,18 @@ export default function Menu({ products }: MenuProps) {
     const message = encodeURIComponent(
       `Halo Kaktus Coffee! Saya tertarik untuk memesan "${name}" dengan harga Rp${price.toLocaleString(
         'id-ID'
-      )} dari Menu Website. Mohon dipersiapkan.`
+      )} dari Menu Website Anda. Mohon informasi ketersediaannya.`
     );
     window.open(`https://wa.me/6285738662165?text=${message}`, '_blank');
+  };
+
+  const handleGrabFood = () => {
+    if (onOrderGrabFood) {
+      onOrderGrabFood();
+    } else {
+      const url = linkGrabFood || 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8';
+      window.open(url, '_blank');
+    }
   };
 
   return (
@@ -104,11 +116,10 @@ export default function Menu({ products }: MenuProps) {
               >
                 {/* Thumb */}
                 <div className="relative aspect-[4/3] overflow-hidden bg-elegant-green-950/40">
-                  <img
+                  <ImageWithFallback
                     src={item.fotoUrl}
                     alt={item.nama}
                     className="w-full h-full object-cover transition-all duration-500 group-hover:scale-105"
-                    referrerPolicy="no-referrer"
                     loading="lazy"
                   />
                   {item.isBestSeller && (
@@ -139,13 +150,23 @@ export default function Menu({ products }: MenuProps) {
                     </p>
                   </div>
 
-                  <button
-                    onClick={() => handleOrderWa(item.nama, item.harga)}
-                    className="mt-4 w-full flex items-center justify-center gap-1.5 border border-white/10 bg-white/5 hover:bg-accent-gold hover:text-elegant-green-950 text-gray-300 hover:border-accent-gold text-[11px] font-display font-semibold uppercase tracking-wider py-2 rounded-lg transition-all duration-300"
-                  >
-                    <MessageCircle size={12} />
-                    Pesan WA
-                  </button>
+                  {/* Actions buttons */}
+                  <div className="grid grid-cols-2 gap-2 mt-4">
+                    <button
+                      onClick={() => handleOrderWa(item.nama, item.harga)}
+                      className="flex items-center justify-center gap-1 bg-white/5 hover:bg-[#25D366] hover:text-white text-gray-300 text-[10px] font-display font-semibold uppercase tracking-wider py-2 rounded-lg border border-white/10 hover:border-[#25D366] transition-all duration-300 cursor-pointer"
+                    >
+                      <MessageCircle size={11} />
+                      WhatsApp
+                    </button>
+                    <button
+                      onClick={handleGrabFood}
+                      className="flex items-center justify-center gap-1 bg-[#00B14F] hover:bg-emerald-500 text-white text-[10px] font-display font-semibold uppercase tracking-wider py-2 rounded-lg transition-all duration-300 cursor-pointer"
+                    >
+                      <ExternalLink size={11} />
+                      GrabFood
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -158,7 +179,6 @@ export default function Menu({ products }: MenuProps) {
             </p>
           </div>
         )}
-
       </div>
     </section>
   );

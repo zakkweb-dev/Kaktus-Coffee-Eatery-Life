@@ -1,6 +1,6 @@
 {
   "name": "Kaktus Coffee Eatery Life",
-  "description": "Website Resmi Kaktus Coffee Eatery Life - Nikmati kopi premium dengan suasana elegan dan kelola konten melalui Admin Dashboard mandiri terintegrasi Google Sheets.",
+  "description": "Website Resmi Kaktus Coffee Eatery & Life - Nikmati sajian premium dan kustomisasi kue dengan suasana elegan, didukung oleh Admin Dashboard mandiri dan Firebase Firestore terproteksi aman.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

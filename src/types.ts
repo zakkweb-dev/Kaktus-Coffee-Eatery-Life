@@ -42,16 +42,48 @@ export interface Cabang {
   mapsUrl: string;
   noWa: string;
   fotoUrl: string;
+  linkGrabFood?: string;
+  noWaCake?: string;
+  pesanWaCake?: string;
+}
+
+export interface CustomCake {
+  id: string;
+  nama: string;
+  deskripsi: string;
+  hargaMulai: number;
+  fotoUrl: string;
+  pilihanRasa?: string;
+  isActive: boolean;
 }
 
 export interface AdminCredentials {
+  uid: string;
   email: string;
-  passwordHash: string; // Stored password
+  role: 'Owner' | 'Manager';
 }
 
 export interface DatabaseConfig {
-  googleScriptUrl: string; // Apps Script Web App URL
-  useGoogleSheets: boolean;
+  linkGrabFood: string; // URL for GrabFood
+  noWaCake: string; // WhatsApp number for Custom Cake orders
+}
+
+export interface Review {
+  id: string;
+  nama: string;
+  rating: number; // 1-5
+  ulasan: string;
+  status: 'pending' | 'approved';
+  createdAt: number; // timestamp
+}
+
+export interface HeroBanner {
+  id: string;
+  fotoUrl: string;
+  title?: string;
+  subtitle?: string;
+  isActive: boolean;
+  order: number;
 }
 
 export interface FullDatabase {
@@ -60,6 +92,8 @@ export interface FullDatabase {
   event: Event[];
   galeri: Galeri[];
   cabang: Cabang[];
-  admin: AdminCredentials;
+  customCake: CustomCake[];
+  admins: AdminCredentials[];
   config: DatabaseConfig;
+  banners: HeroBanner[];
 }

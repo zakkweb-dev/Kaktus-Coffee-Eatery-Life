@@ -1,8 +1,193 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // 1. Global Safety Net deny-bydefault
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper functions
+
+    // Check if user is signed in
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Check if signed-in user is an administrator (Owner or Manager)
+    // Supports the bootstrapped user email or direct lookup in the admins collection
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'alrazakiswar11@gmail.com' ||
+        request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
+        request.auth.uid == 'WhmW9LYAPGfSCoRwLbmrmz6YZOF2' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Check valid string length to prevent Denial of Wallet string injection
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Validation blueprints for each entity
+
+    function isValidProduk(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.harga is number && item.harga >= 0 &&
+             item.kategori is string && item.kategori.size() <= 128 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.deskripsi is string && item.deskripsi.size() <= 2000 &&
+             item.get('isBestSeller', false) is bool;
+    }
+
+    function isValidLaunching(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.hargaNormal is number && item.hargaNormal >= 0 &&
+             item.hargaPromo is number && item.hargaPromo >= 0 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.get('tanggalMulai', '') is string && item.get('tanggalMulai', '').size() <= 128 &&
+             item.get('tanggalSelesai', '') is string && item.get('tanggalSelesai', '').size() <= 128 &&
+             item.get('badge', '') is string && item.get('badge', '').size() <= 128 &&
+             item.get('isActive', false) is bool;
+    }
+
+    function isValidEvent(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.tanggal is string && item.tanggal.size() <= 128 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.get('deskripsi', '') is string && item.get('deskripsi', '').size() <= 2000;
+    }
+
+    function isValidGaleri(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.get('deskripsi', '') is string && item.get('deskripsi', '').size() <= 1000;
+    }
+
+    function isValidCabang(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.alamat is string && item.alamat.size() <= 1000 &&
+             item.jamOperasional is string && item.jamOperasional.size() <= 128 &&
+             item.mapsUrl is string && item.mapsUrl.size() <= 1000 &&
+             item.noWa is string && item.noWa.size() <= 64 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.get('linkGrabFood', '') is string && item.get('linkGrabFood', '').size() <= 1000 &&
+             item.get('noWaCake', '') is string && item.get('noWaCake', '').size() <= 64 &&
+             item.get('pesanWaCake', '') is string && item.get('pesanWaCake', '').size() <= 1000;
+    }
+
+    function isValidCustomCake(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.deskripsi is string && item.deskripsi.size() <= 2000 &&
+             item.hargaMulai is number && item.hargaMulai >= 0 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.get('pilihanRasa', '') is string && item.get('pilihanRasa', '').size() <= 1000 &&
+             item.get('isActive', false) is bool;
+    }
+
+    function isValidHeroBanner(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.fotoUrl is string && item.fotoUrl.size() <= 500 &&
+             item.isActive is bool &&
+             item.order is number &&
+             item.get('title', '') is string && item.get('title', '').size() <= 128 &&
+             item.get('subtitle', '') is string && item.get('subtitle', '').size() <= 256;
+    }
+
+    function isValidConfig(item) {
+      return item.linkGrabFood is string && item.linkGrabFood.size() <= 500 &&
+             item.get('noWaCake', '') is string && item.get('noWaCake', '').size() <= 64;
+    }
+
+    function isValidAdmin(item) {
+      return item.uid is string && item.uid.size() <= 128 &&
+             item.email is string && item.email.size() <= 128 &&
+             item.role is string && (item.role == 'Owner' || item.role == 'Manager') &&
+             (item.username == null || (item.username is string && item.username.size() <= 128)) &&
+             (item.passwordHash == null || (item.passwordHash is string && item.passwordHash.size() <= 256));
+    }
+
+    function isValidReview(item) {
+      return item.id is string && item.id.size() <= 128 &&
+             item.nama is string && item.nama.size() <= 128 &&
+             item.rating is number && item.rating >= 1 && item.rating <= 5 &&
+             item.ulasan is string && item.ulasan.size() <= 2000 &&
+             item.status is string && (item.status == 'pending' || item.status == 'approved') &&
+             item.createdAt is number;
+    }
+
+    // Rules for each collection
+
+    match /produk/{id} {
+      allow read: if true; // Publicly readable for marketing
+      allow create, update: if isAdmin() && isValidId(id) && isValidProduk(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /launching/{id} {
+      allow read: if true; // Publicly readable for promo launch
+      allow create, update: if isAdmin() && isValidId(id) && isValidLaunching(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /event/{id} {
+      allow read: if true; // Publicly readable for events
+      allow create, update: if isAdmin() && isValidId(id) && isValidEvent(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /galeri/{id} {
+      allow read: if true; // Publicly readable for galleries
+      allow create, update: if isAdmin() && isValidId(id) && isValidGaleri(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /cabang/{id} {
+      allow read: if true; // Publicly readable for location branches
+      allow create, update: if isAdmin() && isValidId(id) && isValidCabang(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /custom_cake/{id} {
+      allow read: if true; // Publicly readable for custom cakes
+      allow create, update: if isAdmin() && isValidId(id) && isValidCustomCake(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /hero_banners/{id} {
+      allow read: if true; // Publicly readable for carousel slider
+      allow create, update: if isAdmin() && isValidId(id) && isValidHeroBanner(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /config/{id} {
+      allow read: if true; // Publicly readable for operational links like GrabFood
+      allow write: if isAdmin() && isValidId(id);
+    }
+
+    match /admins/{uid} {
+      // Admins are readable if looking up their own status, or if the requester is an admin
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      
+      // Admins can be written if the requester is an admin, or if it is the bootstrapped email registering for first-time login
+      allow write: if isSignedIn() && (
+        request.auth.uid == uid && request.auth.token.email == 'alrazakiswar11@gmail.com' || 
+        isAdmin()
+      ) && isValidId(uid) && isValidAdmin(request.resource.data);
+    }
+
+    match /reviews/{id} {
+      allow read: if true; // Publicly readable for list of reviews or admin loading pending reviews
+      allow create: if (isAdmin() && isValidId(id) && isValidReview(request.resource.data)) || 
+                    (isValidId(id) && isValidReview(request.resource.data) && request.resource.data.status == 'pending');
+      allow update: if isAdmin() && isValidId(id) && isValidReview(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

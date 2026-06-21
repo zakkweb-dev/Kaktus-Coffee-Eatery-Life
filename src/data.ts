@@ -1,10 +1,9 @@
-import { Produk, Launching, Event, Galeri, Cabang, FullDatabase, AdminCredentials } from './types';
+import { Produk, Launching, Event, Galeri, Cabang, FullDatabase, CustomCake } from './types';
 
-// Let's format dates dynamically so that the New Launch promotional countdown starts perfectly with 2 days left from today, ensuring a spectacular visual test!
+// Dynamic date strings for promotional offer
 const getFutureDateString = (daysAhead: number): string => {
   const date = new Date();
   date.setDate(date.getDate() + daysAhead);
-  // Add some hours
   date.setHours(23, 59, 59, 0);
   return date.toISOString();
 };
@@ -132,8 +131,8 @@ export const INITIAL_LAUNCHES: Launching[] = [
     nama: 'Minty Emerald Cactus Cold Brew',
     hargaNormal: 38000,
     hargaPromo: 28000,
-    tanggalMulai: getPastDateString(1), // Started yesterday
-    tanggalSelesai: getFutureDateString(3), // Finishes in 3 days
+    tanggalMulai: getPastDateString(1),
+    tanggalSelesai: getFutureDateString(3),
     badge: '🚀 Launching',
     fotoUrl: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?q=80&w=600&auto=format&fit=crop',
     isActive: true
@@ -203,23 +202,35 @@ export const INITIAL_BRANCHES: Cabang[] = [
   }
 ];
 
-export const DEFAULT_ADMIN: AdminCredentials = {
-  email: 'admin@kaktus.com',
-  passwordHash: 'kaktus11' // For simplification & ease of login for cafe owner
-};
-
-export const INITIAL_DATABASE: FullDatabase = {
-  produk: INITIAL_PRODUCTS,
-  launching: INITIAL_LAUNCHES,
-  event: INITIAL_EVENTS,
-  galeri: INITIAL_GALLERY,
-  cabang: INITIAL_BRANCHES,
-  admin: DEFAULT_ADMIN,
-  config: {
-    googleScriptUrl: '',
-    useGoogleSheets: false
+export const INITIAL_CUSTOM_CAKE: CustomCake[] = [
+  {
+    id: 'cake-1',
+    nama: 'Chocolatier Velvet Cactus Cake',
+    deskripsi: 'Kue lapis cokelat premium Belgia bertingkat yang dihias dengan fondant kaktus xerofit estetik buatan tangan. Cocok untuk ulang tahun bertema gurun pasir modern.',
+    hargaMulai: 250000,
+    fotoUrl: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?q=80&w=600&auto=format&fit=crop',
+    pilihanRasa: 'Triple Dark Chocolate, Hazelnut Mousse',
+    isActive: true
+  },
+  {
+    id: 'cake-2',
+    nama: 'Emerald Matcha Succulent Cake',
+    deskripsi: 'Kue berbahan dasar teh hijau matcha Uji murni yang mewah, dihias cantik menggunakan buttercream succulent membentuk aneka tanaman kaktus hias mini hijau yang menawan.',
+    hargaMulai: 220000,
+    fotoUrl: 'https://images.unsplash.com/photo-1535141192574-5d4897c13636?q=80&w=600&auto=format&fit=crop',
+    pilihanRasa: 'Matcha Green Tea, Vanilla Bean',
+    isActive: true
+  },
+  {
+    id: 'cake-3',
+    nama: 'Rustic Terracotta Arid Cake',
+    deskripsi: 'Kue pernikahan bertema rustic gurun pasir elegan. Menggunakan dekorasi bunga terracotta kering yang eksotis dipadukan fondant bertekstur pasir koral halus.',
+    hargaMulai: 450000,
+    fotoUrl: 'https://images.unsplash.com/photo-1511018556340-d16986a1c194?q=80&w=600&auto=format&fit=crop',
+    pilihanRasa: 'Salted Caramel, Classic Madagascar Vanilla',
+    isActive: true
   }
-};
+];
 
 export const TESTIMONIALS = [
   {
@@ -247,3 +258,18 @@ export const TESTIMONIALS = [
     ulasan: 'Saya sering memesan Meeting Room di Kaktus Parangloe bersama klien industri saya. Tempatnya sangat representatif, layanan tenang, ramah, dan hidangan makanan premium.'
   }
 ];
+
+export const INITIAL_DATABASE: FullDatabase = {
+  produk: INITIAL_PRODUCTS,
+  launching: INITIAL_LAUNCHES,
+  event: INITIAL_EVENTS,
+  galeri: INITIAL_GALLERY,
+  cabang: INITIAL_BRANCHES,
+  customCake: INITIAL_CUSTOM_CAKE,
+  admins: [],
+  config: {
+    linkGrabFood: 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8',
+    noWaCake: '6285738662165'
+  },
+  banners: []
+};

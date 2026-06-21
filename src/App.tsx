@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc } from 'firebase/firestore';
-import { db, seedDatabaseIfNeeded, syncStateArrayToFirestore, syncConfig } from './lib/firebase';
-import { INITIAL_DATABASE } from './data';
-import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig } from './types';
+import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { db, auth, seedDatabaseIfNeeded, syncStateArrayToFirestore, syncConfig, handleFirestoreError, OperationType } from './lib/firebase';
+import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, CustomCake, HeroBanner } from './types';
+import { AnimatePresence, motion } from 'motion/react';
+import { X, Clock, ExternalLink, MessageSquare } from 'lucide-react';
 
-// Importing sub-components
+// Importing UI Sub-components
 import Header from './components/Header';
 import Hero from './components/Hero';
 import About from './components/About';
 import NewLaunch from './components/NewLaunch';
 import BestSeller from './components/BestSeller';
 import Menu from './components/Menu';
+import CustomCakeSection from './components/CustomCakeSection';
 import CabangSection from './components/Cabang';
 import EventSection from './components/EventSection';
 import GaleriSection from './components/Galeri';
@@ -21,58 +24,113 @@ import FloatingWhatsApp from './components/FloatingWhatsApp';
 import BackToTop from './components/BackToTop';
 import BottomNavigation from './components/BottomNavigation';
 import AdminPanel from './components/AdminPanel';
+import Toast from './components/Toast';
 
 export default function App() {
-  // State definitions loaded from localStorage or default static database values
+  // Primary operational states with Local Storage cache recovery
   const [products, setProducts] = useState<Produk[]>([]);
   const [launches, setLaunches] = useState<Launching[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [gallery, setGallery] = useState<Galeri[]>([]);
   const [branches, setBranches] = useState<Cabang[]>([]);
-  const [config, setConfig] = useState<DatabaseConfig>({ googleScriptUrl: '', useGoogleSheets: false });
+  const [customCakes, setCustomCakes] = useState<CustomCake[]>([]);
+  const [config, setConfig] = useState<DatabaseConfig>({ linkGrabFood: 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8' });
+  const [banners, setBanners] = useState<HeroBanner[]>([]);
+  
+  // Security session states
+  const [user, setUser] = useState<User | null>(null);
+  const [adminRole, setAdminRole] = useState<'Owner' | 'Manager' | null>(null);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
 
-  // Navigation route controls
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [activeSection, setActiveSection] = useState('hero');
-  const [isLoadingCloud, setIsLoadingCloud] = useState(false);
-  const [cloudError, setCloudError] = useState('');
 
-  // 1. Initial Route and Hash bootstrapping
+  // Customer branch routing override popup states
+  const [grabFoodModalOpen, setGrabFoodModalOpen] = useState(false);
+  const [customCakeModalOpen, setCustomCakeModalOpen] = useState(false);
+  const [selectedCakeName, setSelectedCakeName] = useState('');
+
+  // 1. Recover from Cache and Bind Hash Change Router
   useEffect(() => {
-    // Check if hashes exist in address bar to route directly
     const handleHashChange = () => {
       setIsAdminMode(window.location.hash === '#admin');
     };
     
     window.addEventListener('hashchange', handleHashChange);
-    
-    // Check hash on initial load
     handleHashChange();
 
-    // Recover from LocalStorage immediately for instant UI availability while fetching Firestore
     const savedProducts = localStorage.getItem('kaktus_products');
     const savedLaunches = localStorage.getItem('kaktus_launches');
     const savedEvents = localStorage.getItem('kaktus_events');
     const savedGallery = localStorage.getItem('kaktus_gallery');
     const savedBranches = localStorage.getItem('kaktus_branches');
+    const savedCustomCakes = localStorage.getItem('kaktus_custom_cakes');
     const savedConfig = localStorage.getItem('kaktus_config');
+    const savedBanners = localStorage.getItem('kaktus_banners');
 
     if (savedProducts) setProducts(JSON.parse(savedProducts));
     if (savedLaunches) setLaunches(JSON.parse(savedLaunches));
     if (savedEvents) setEvents(JSON.parse(savedEvents));
     if (savedGallery) setGallery(JSON.parse(savedGallery));
     if (savedBranches) setBranches(JSON.parse(savedBranches));
+    if (savedCustomCakes) setCustomCakes(JSON.parse(savedCustomCakes));
     if (savedConfig) setConfig(JSON.parse(savedConfig));
+    if (savedBanners) setBanners(JSON.parse(savedBanners));
 
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  // 2. Real-time Firebase Firestore synchronizer
+  // 2. Auth Session Guard & Automated Bootstrap Seeding
   useEffect(() => {
-    // Bootstrap Firestore with default data if empty
     seedDatabaseIfNeeded();
 
-    // Register live listeners
+    const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        setCheckingAdmin(true);
+        try {
+          const docRef = doc(db, 'admins', firebaseUser.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            setAdminRole(docSnap.data().role as 'Owner' | 'Manager');
+            // Re-run seeding since an authenticated admin is now confirmed!
+            await seedDatabaseIfNeeded();
+          } else if (firebaseUser.email === 'alrazakiswar11@gmail.com' || firebaseUser.email === 'al_rasyak_izwar@kaktuscoffee.com') {
+            // First-time owner bootstrap profiling
+            const profile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || 'al_rasyak_izwar@kaktuscoffee.com',
+              role: 'Owner' as const,
+              username: 'Al Rasyak Izwar',
+              passwordHash: '38ea1221b3a6efbe669cbdf2674e300ac82effd9d2011b98ce857cc9d8926952' // SHA-256 for kaktus123
+            };
+            await setDoc(docRef, profile);
+            setAdminRole('Owner');
+            // Re-run seeding since owner is created!
+            await seedDatabaseIfNeeded();
+          } else {
+            console.warn('[Admin Guard] Sign-in succeeded but email has no admin record.');
+            setAdminRole(null);
+          }
+        } catch (err) {
+          console.error('[Admin Guard] Accessing admins collection errored:', err);
+          setAdminRole(null);
+        } finally {
+          setCheckingAdmin(false);
+        }
+      } else {
+        setUser(null);
+        setAdminRole(null);
+        setCheckingAdmin(false);
+      }
+    });
+
+    return () => unsubAuth();
+  }, []);
+
+  // 3. Bind Live Firestore Listeners
+  useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, 'produk'), (snapshot) => {
       const items: Produk[] = [];
       snapshot.forEach((d) => {
@@ -81,6 +139,12 @@ export default function App() {
       const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setProducts(sorted);
       localStorage.setItem('kaktus_products', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'produk'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading products:', error);
+      }
     });
 
     const unsubLaunches = onSnapshot(collection(db, 'launching'), (snapshot) => {
@@ -91,6 +155,12 @@ export default function App() {
       const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setLaunches(sorted);
       localStorage.setItem('kaktus_launches', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'launching'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading launches:', error);
+      }
     });
 
     const unsubEvents = onSnapshot(collection(db, 'event'), (snapshot) => {
@@ -101,6 +171,12 @@ export default function App() {
       const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setEvents(sorted);
       localStorage.setItem('kaktus_events', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'event'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading events:', error);
+      }
     });
 
     const unsubGallery = onSnapshot(collection(db, 'galeri'), (snapshot) => {
@@ -111,6 +187,12 @@ export default function App() {
       const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setGallery(sorted);
       localStorage.setItem('kaktus_gallery', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'galeri'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading gallery:', error);
+      }
     });
 
     const unsubBranches = onSnapshot(collection(db, 'cabang'), (snapshot) => {
@@ -121,6 +203,28 @@ export default function App() {
       const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
       setBranches(sorted);
       localStorage.setItem('kaktus_branches', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'cabang'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading branches:', error);
+      }
+    });
+
+    const unsubCustomCakes = onSnapshot(collection(db, 'custom_cake'), (snapshot) => {
+      const items: CustomCake[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as CustomCake);
+      });
+      const sorted = items.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+      setCustomCakes(sorted);
+      localStorage.setItem('kaktus_custom_cakes', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'custom_cake'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading custom cakes:', error);
+      }
     });
 
     const unsubConfig = onSnapshot(doc(db, 'config', 'default'), (snapshot) => {
@@ -128,6 +232,28 @@ export default function App() {
         const configData = snapshot.data() as DatabaseConfig;
         setConfig(configData);
         localStorage.setItem('kaktus_config', JSON.stringify(configData));
+      }
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'config/default'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading config:', error);
+      }
+    });
+
+    const unsubBanners = onSnapshot(collection(db, 'hero_banners'), (snapshot) => {
+      const items: HeroBanner[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as HeroBanner);
+      });
+      const sorted = items.sort((a, b) => a.order - b.order);
+      setBanners(sorted);
+      localStorage.setItem('kaktus_banners', JSON.stringify(sorted));
+    }, (error) => {
+      if (error?.message?.includes('permission') || error?.code === 'permission-denied') {
+        try { handleFirestoreError(error, OperationType.GET, 'hero_banners'); } catch (e) {}
+      } else {
+        console.error('[Firebase] Error loading hero banners:', error);
       }
     });
 
@@ -137,11 +263,13 @@ export default function App() {
       unsubEvents();
       unsubGallery();
       unsubBranches();
+      unsubCustomCakes();
       unsubConfig();
+      unsubBanners();
     };
   }, []);
 
-  // Sync state modifications to Firebase Cloud Storage with Local cache fallback
+  // 4. State mutators with delta synced transactions
   const updateProducts = (newList: Produk[]) => {
     const oldList = [...products];
     setProducts(newList);
@@ -170,13 +298,34 @@ export default function App() {
     syncStateArrayToFirestore('galeri', oldList, newList);
   };
 
+  const updateCustomCakes = (newList: CustomCake[]) => {
+    const oldList = [...customCakes];
+    setCustomCakes(newList);
+    localStorage.setItem('kaktus_custom_cakes', JSON.stringify(newList));
+    syncStateArrayToFirestore('custom_cake', oldList, newList);
+  };
+
+  const updateBranches = (newList: Cabang[]) => {
+    const oldList = [...branches];
+    setBranches(newList);
+    localStorage.setItem('kaktus_branches', JSON.stringify(newList));
+    syncStateArrayToFirestore('cabang', oldList, newList);
+  };
+
   const updateConfig = (newConfig: DatabaseConfig) => {
     setConfig(newConfig);
     localStorage.setItem('kaktus_config', JSON.stringify(newConfig));
     syncConfig(newConfig);
+    showToast('Konfigurasi berhasil disimpan.', 'success');
   };
 
-  // Safe scroll trigger
+  const updateBanners = (newList: HeroBanner[]) => {
+    const oldList = [...banners];
+    setBanners(newList);
+    localStorage.setItem('kaktus_banners', JSON.stringify(newList));
+    syncStateArrayToFirestore('hero_banners', oldList, newList);
+  };
+
   const handleScrollToSection = (id: string) => {
     setActiveSection(id);
     const element = document.getElementById(id);
@@ -194,24 +343,26 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      showToast('Berhasil keluar dari panel admin.', 'success');
+      setIsAdminMode(false);
+      window.location.hash = '';
+    } catch (err) {
+      console.error('[Admin Auth] Error signing out:', err);
+      showToast('Gagal keluar dari panel admin.', 'error');
+    }
+  };
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+  };
+
   return (
     <div className="bg-elegant-green-950 min-h-screen text-slate-100 selection:bg-accent-gold selection:text-elegant-green-950 font-sans antialiased overflow-x-hidden">
       
-      {/* Dynamic Cloud Data loading indicator at top */}
-      {isLoadingCloud && (
-        <div className="fixed top-0 left-0 right-0 z-[110] bg-accent-gold text-elegant-green-950 font-mono text-[10px] uppercase font-bold tracking-widest text-center py-1 flex items-center justify-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping" />
-          Mendapatkan data segar dari Google Sheets...
-        </div>
-      )}
-
-      {cloudError && (
-        <div className="fixed top-1 left-4 z-[110] bg-red-500/90 text-white rounded px-3 py-1 text-[10px] font-mono shadow-md">
-          ⚠️ {cloudError}
-        </div>
-      )}
-
-      {/* Global sticky header */}
+      {/* Global Sticky Navigation Header */}
       <Header
         isAdminMode={isAdminMode}
         onNavigateToAdmin={() => {
@@ -235,22 +386,36 @@ export default function App() {
             events={events}
             gallery={gallery}
             branches={branches}
+            customCakes={customCakes}
             onUpdateProducts={updateProducts}
             onUpdateLaunches={updateLaunches}
             onUpdateEvents={updateEvents}
             onUpdateGallery={updateGallery}
+            onUpdateCustomCakes={updateCustomCakes}
+            onUpdateBranches={updateBranches}
             config={config}
             onUpdateConfig={updateConfig}
+            banners={banners}
+            onUpdateBanners={updateBanners}
+            user={user}
+            adminRole={adminRole}
+            checkingAdmin={checkingAdmin}
+            onLogout={handleLogout}
+            onShowToast={showToast}
           />
         </div>
       ) : (
         <div className="relative">
           {/* Landing page sections stack */}
-          <Hero onScrollTo={handleScrollToSection} />
+          <Hero onScrollTo={handleScrollToSection} banners={banners} />
           <About />
-          <NewLaunch launches={launches} />
-          <BestSeller products={products} />
-          <Menu products={products} />
+          <NewLaunch launches={launches} linkGrabFood={config.linkGrabFood} onOrderGrabFood={() => setGrabFoodModalOpen(true)} />
+          <BestSeller products={products} linkGrabFood={config.linkGrabFood} onOrderGrabFood={() => setGrabFoodModalOpen(true)} />
+          <Menu products={products} linkGrabFood={config.linkGrabFood} onOrderGrabFood={() => setGrabFoodModalOpen(true)} />
+          <CustomCakeSection customCakes={customCakes} noWaCake={config.noWaCake} onConsultCake={(cakeName) => {
+            setSelectedCakeName(cakeName);
+            setCustomCakeModalOpen(true);
+          }} />
           <CabangSection branches={branches} />
           <EventSection events={events} onScrollTo={handleScrollToSection} />
           <GaleriSection gallery={gallery} />
@@ -270,6 +435,180 @@ export default function App() {
           <BackToTop />
         </div>
       )}
+
+      {/* 🛵 GrabFood Branch Selection Popup Modal */}
+      <AnimatePresence>
+        {grabFoodModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md"
+            onClick={() => setGrabFoodModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-elegant-green-950/95 border border-accent-gold/25 text-white max-w-md w-full rounded-2xl overflow-hidden shadow-2xl p-6 space-y-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start border-b border-white/5 pb-4">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-mono tracking-widest text-accent-gold font-bold">🛵 Delivery Order</span>
+                  <h4 className="font-display text-lg font-extrabold uppercase tracking-tight">Pilih Cabang Terdekat</h4>
+                </div>
+                <button
+                  onClick={() => setGrabFoodModalOpen(false)}
+                  className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  id="close-grabfood-modal"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-gray-300 text-xs sm:text-sm font-sans">
+                Silakan pilih outlet cabang Cafe Kaktus yang paling dekat dengan lokasi Anda untuk menghemat ongkos kirim GrabFood.
+              </p>
+
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin">
+                {branches.filter(b => b.linkGrabFood && b.linkGrabFood.trim() !== '').length > 0 ? (
+                  branches.filter(b => b.linkGrabFood && b.linkGrabFood.trim() !== '').map((branch) => (
+                    <div 
+                      key={branch.id} 
+                      className="p-4 rounded-xl border border-white/5 bg-white/5 hover:border-accent-gold/30 hover:bg-white/10 transition-all flex justify-between items-center group gap-4 text-left"
+                    >
+                      <div className="space-y-1">
+                        <span className="block text-xs font-bold font-display text-white uppercase group-hover:text-accent-gold transition-colors">{branch.nama}</span>
+                        <div className="flex items-center gap-1.5 text-[10px] text-gray-400 font-mono">
+                          <Clock size={12} className="text-accent-gold" />
+                          <span>{branch.jamOperasional}</span>
+                        </div>
+                      </div>
+                      <a
+                        href={branch.linkGrabFood}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-[#00B14F] hover:bg-emerald-500 text-white text-[10px] font-display font-extrabold uppercase tracking-wide px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer shadow-md"
+                      >
+                        Pesan
+                        <ExternalLink size={10} />
+                      </a>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center border border-dashed border-white/10 rounded-xl space-y-3">
+                    <p className="text-xs text-gray-400">Belum ada cabang dengan konfigurasi layanan online GrabFood.</p>
+                    <a
+                      href={config.linkGrabFood || "https://food.grab.com"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block bg-[#00B14F] hover:bg-emerald-500 text-white text-[10px] font-display font-extrabold uppercase tracking-wide px-4 py-2 rounded-lg transition-colors"
+                    >
+                      Buka GrabFood Global
+                    </a>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 🎂 Custom Cake Branch Selection Popup Modal */}
+      <AnimatePresence>
+        {customCakeModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md"
+            onClick={() => setCustomCakeModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-elegant-green-950/95 border border-accent-gold/25 text-white max-w-md w-full rounded-2xl overflow-hidden shadow-2xl p-6 space-y-6"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start border-b border-white/5 pb-4">
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-mono tracking-widest text-accent-gold font-bold">🎂 Custom Cake Baker</span>
+                  <h4 className="font-display text-lg font-extrabold uppercase tracking-tight">Pilih Cabang Pembuatan</h4>
+                </div>
+                <button
+                  onClick={() => setCustomCakeModalOpen(false)}
+                  className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  id="close-cake-modal"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p className="text-gray-300 text-xs sm:text-sm font-sans">
+                Kue kustomisasi premium Kaktus dibuat eksklusif & hand-crafted di outlet cabang pilihan Anda. Silakan pilih cabang Anda:
+              </p>
+
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1 scrollbar-thin text-left">
+                {branches.filter(b => b.noWaCake && b.noWaCake.trim() !== '').length > 0 ? (
+                  branches.filter(b => b.noWaCake && b.noWaCake.trim() !== '').map((branch) => (
+                    <div 
+                      key={branch.id} 
+                      className="p-4 rounded-xl border border-white/5 bg-white/5 hover:border-accent-gold/30 hover:bg-white/10 transition-all flex justify-between items-center group gap-4 text-left"
+                    >
+                      <div className="space-y-1 flex-1">
+                        <span className="block text-xs font-bold font-display text-white uppercase group-hover:text-accent-gold transition-colors">{branch.nama}</span>
+                        <p className="text-[10px] text-gray-400 line-clamp-1">{branch.alamat}</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const customMessage = branch.pesanWaCake 
+                            ? branch.pesanWaCake.replace('{nama}', selectedCakeName) 
+                            : `Halo Kaktus Coffee & Bakeshop! Saya ingin berkonsultasi mengenai pesanan kue kustomisasi untuk model "${selectedCakeName}". Mohon info detail untuk ukuran, rasa, dan waktu pembuatan.`;
+                          const cleanWa = branch.noWaCake.replace(/[^0-9]/g, '');
+                          window.open(`https://wa.me/${cleanWa}?text=${encodeURIComponent(customMessage)}`, '_blank');
+                          setCustomCakeModalOpen(false);
+                        }}
+                        className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-display font-extrabold uppercase tracking-wide px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-1 cursor-pointer shadow-md shrink-0"
+                      >
+                        Pilih
+                        <MessageSquare size={10} />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center border border-dashed border-white/10 rounded-xl space-y-3">
+                    <p className="text-xs text-gray-400">Pemesanan kue sementara diarahkan ke nomor WA pusat bakeshop.</p>
+                    <button
+                      onClick={() => {
+                        const centralMessage = `Halo Kaktus Coffee & Bakeshop! Saya ingin berkonsultasi mengenai pesanan kue kustomisasi untuk model "${selectedCakeName}". Mohon info detail untuk ukuran, rasa, dan waktu pembuatan.`;
+                        const cleanWa = (config.noWaCake || '6285738662165').replace(/[^0-9]/g, '');
+                        window.open(`https://wa.me/${cleanWa}?text=${encodeURIComponent(centralMessage)}`, '_blank');
+                        setCustomCakeModalOpen(false);
+                      }}
+                      className="inline-block bg-accent-gold hover:bg-white text-elegant-green-950 text-[10px] font-display font-extrabold uppercase tracking-wide px-4 py-2 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Hubungi WA Pusat
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dynamic Toast notifications wrapper */}
+      <AnimatePresence>
+        {toast && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast(null)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Mobile-only Bottom Navigation Tab bar */}
       <BottomNavigation

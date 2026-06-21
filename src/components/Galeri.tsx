@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Maximize2, X, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { Galeri } from '../types';
+import ImageWithFallback from './ImageWithFallback';
 
 interface GaleriProps {
   gallery: Galeri[];
@@ -49,7 +50,7 @@ export default function GaleriSection({ gallery }: GaleriProps) {
           </h2>
           <div className="w-16 h-[2px] bg-accent-gold mx-auto my-3" />
           <p className="text-gray-400 text-xs sm:text-sm max-w-lg mx-auto font-sans">
-            Sudut-sudut foto favorit yang sering diabadikan oleh pengunjung dan fotografer profesional di ruang asri kami.
+            Sudut-sudut foto favorit yang sering diabadikan oleh pengunjung and fotografer profesional di ruang asri kami.
           </p>
         </div>
 
@@ -61,11 +62,10 @@ export default function GaleriSection({ gallery }: GaleriProps) {
               onClick={() => openLightbox(idx)}
               className="relative aspect-square sm:aspect-[4/3] rounded-2xl overflow-hidden group cursor-pointer border border-accent-gold/10 shadow-lg hover:border-accent-gold/35 hover:-translate-y-1 transition-all duration-300 bg-elegant-green-900/60"
             >
-              <img
+              <ImageWithFallback
                 src={pic.fotoUrl}
                 alt={pic.deskripsi}
                 className="w-full h-full object-cover transition-transform duration-[800ms] group-hover:scale-105"
-                referrerPolicy="no-referrer"
                 loading="lazy"
               />
 
@@ -123,11 +123,10 @@ export default function GaleriSection({ gallery }: GaleriProps) {
 
               {/* Interactive Image Frame */}
               <div className="max-h-[75vh] flex flex-col items-center relative rounded-xl overflow-hidden shadow-2xl border border-white/10 bg-elegant-green-950">
-                <img
+                <ImageWithFallback
                   src={gallery[activeIdx].fotoUrl}
                   alt={gallery[activeIdx].deskripsi}
                   className="max-h-[65vh] object-contain w-auto block max-w-full"
-                  referrerPolicy="no-referrer"
                 />
                 
                 {/* Description Footer */}

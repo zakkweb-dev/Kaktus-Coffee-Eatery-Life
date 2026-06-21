@@ -1,11 +1,14 @@
-import { Star, MessageCircle } from 'lucide-react';
+import { Star, MessageCircle, ExternalLink } from 'lucide-react';
 import { Produk } from '../types';
+import ImageWithFallback from './ImageWithFallback';
 
 interface BestSellerProps {
   products: Produk[];
+  linkGrabFood?: string;
+  onOrderGrabFood?: () => void;
 }
 
-export default function BestSeller({ products }: BestSellerProps) {
+export default function BestSeller({ products, linkGrabFood, onOrderGrabFood }: BestSellerProps) {
   // Filter for best seller products and cap at 6 items max
   const bestSellers = products.filter((p) => p.isBestSeller).slice(0, 6);
 
@@ -15,11 +18,20 @@ export default function BestSeller({ products }: BestSellerProps) {
 
   const handleOrderWa = (name: string, price: number) => {
     const message = encodeURIComponent(
-      `Halo Kaktus Coffee! Saya ingin memesan salah satu Best Seller favorit Anda: "${name}" seharga Rp${price.toLocaleString(
+      `Halo Kaktus Coffee! Saya ingin memesan salah satu Best Seller terlaris Anda: "${name}" seharga Rp${price.toLocaleString(
         'id-ID'
       )}. Mohon informasi ketersediaannya.`
     );
     window.open(`https://wa.me/6285738662165?text=${message}`, '_blank');
+  };
+
+  const handleGrabFood = () => {
+    if (onOrderGrabFood) {
+      onOrderGrabFood();
+    } else {
+      const url = linkGrabFood || 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8';
+      window.open(url, '_blank');
+    }
   };
 
   return (
@@ -52,11 +64,10 @@ export default function BestSeller({ products }: BestSellerProps) {
             >
               {/* Product Photo Box */}
               <div className="relative aspect-[4/3] overflow-hidden bg-elegant-green-950/20 border-b border-accent-gold/10">
-                <img
+                <ImageWithFallback
                   src={item.fotoUrl}
                   alt={item.nama}
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  referrerPolicy="no-referrer"
                   loading="lazy"
                 />
                 
@@ -92,13 +103,20 @@ export default function BestSeller({ products }: BestSellerProps) {
                 </div>
 
                 {/* Card Button */}
-                <div className="pt-5 mt-auto">
+                <div className="pt-5 mt-auto grid grid-cols-2 gap-2.5">
                   <button
                     onClick={() => handleOrderWa(item.nama, item.harga)}
-                    className="w-full flex items-center justify-center gap-2 border border-accent-gold/20 bg-accent-gold/5 group-hover:bg-accent-gold group-hover:text-elegant-green-950 text-accent-gold py-2.5 rounded-xl text-xs font-display font-bold uppercase tracking-wider transition-all duration-300"
+                    className="flex items-center justify-center gap-1.5 border border-white/15 bg-white/5 hover:bg-[#25D366] hover:text-white hover:border-[#25D366] text-gray-300 py-2.5 rounded-xl text-xs font-display font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer"
                   >
-                    <MessageCircle size={14} />
-                    Pesan Menu Ini
+                    <MessageCircle size={12} />
+                    WhatsApp
+                  </button>
+                  <button
+                    onClick={handleGrabFood}
+                    className="flex items-center justify-center gap-1.5 bg-[#00B14F] hover:bg-emerald-500 text-white py-2.5 rounded-xl text-xs font-display font-bold uppercase tracking-wider transition-all duration-300 cursor-pointer"
+                  >
+                    <ExternalLink size={12} />
+                    GrabFood
                   </button>
                 </div>
               </div>

@@ -33,6 +33,7 @@ export default function Header({
     { id: 'promo', label: 'New Launch' },
     { id: 'bestseller', label: 'Terlaris' },
     { id: 'menu', label: 'Menu' },
+    { id: 'custom-cake', label: 'Custom Cake' }, // Added Custom Cake to Nav Link!
     { id: 'branch', label: 'Cabang' },
     { id: 'event', label: 'Event' },
     { id: 'gallery', label: 'Galeri' },
@@ -44,7 +45,6 @@ export default function Header({
     setActiveSection(id);
     const element = document.getElementById(id);
     if (element) {
-      // Offset for sticky header
       const offset = 80;
       const bodyRect = document.body.getBoundingClientRect().top;
       const elementRect = element.getBoundingClientRect().top;
@@ -135,7 +135,7 @@ export default function Header({
 
         {/* Mobile Hamburger (Only in user mode) */}
         {!isAdminMode && (
-          <div className="flex xl:hidden items-center gap-3">
+          <div className="flex xl:hidden items-center gap-2.5">
             <button
               onClick={onNavigateToAdmin}
               className="p-1.5 border border-accent-gold/20 bg-accent-gold/5 rounded-full text-accent-gold hover:bg-accent-gold/15"
