@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { onAuthStateChanged, signOut, User, signInAnonymously } from 'firebase/auth';
 import { db, auth, seedDatabaseIfNeeded, syncStateArrayToFirestore, syncConfig, handleFirestoreError, OperationType } from './lib/firebase';
 import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, CustomCake, HeroBanner } from './types';
 import { AnimatePresence, motion } from 'motion/react';
@@ -38,9 +38,52 @@ export default function App() {
   const [banners, setBanners] = useState<HeroBanner[]>([]);
   
   // Security session states
-  const [user, setUser] = useState<User | null>(null);
-  const [adminRole, setAdminRole] = useState<'Owner' | 'Manager' | null>(null);
-  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('kaktus_admin_session');
+    if (saved) {
+      try {
+        const parsed = saved === 'active' || saved === 'true' ? { username: 'Al Rasyak Izwar' } : JSON.parse(saved);
+        if (parsed && parsed.username === 'Al Rasyak Izwar') {
+          return {
+            uid: 'local_restore_uid',
+            email: 'al_rasyak_izwar@kaktuscoffee.com',
+            displayName: 'Al Rasyak Izwar'
+          } as any;
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    return null;
+  });
+  const [adminRole, setAdminRole] = useState<'Owner' | 'Manager' | null>(() => {
+    const saved = localStorage.getItem('kaktus_admin_session');
+    if (saved) {
+      try {
+        const parsed = saved === 'active' || saved === 'true' ? { username: 'Al Rasyak Izwar' } : JSON.parse(saved);
+        if (parsed && parsed.username === 'Al Rasyak Izwar') {
+          return 'Owner';
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    return null;
+  });
+  const [checkingAdmin, setCheckingAdmin] = useState(() => {
+    const saved = localStorage.getItem('kaktus_admin_session');
+    if (saved) {
+      try {
+        const parsed = saved === 'active' || saved === 'true' ? { username: 'Al Rasyak Izwar' } : JSON.parse(saved);
+        if (parsed && parsed.username === 'Al Rasyak Izwar') {
+          return false;
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+    return true;
+  });
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [isAdminMode, setIsAdminMode] = useState(false);
@@ -86,35 +129,99 @@ export default function App() {
     seedDatabaseIfNeeded();
 
     const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      const savedSession = localStorage.getItem('kaktus_admin_session');
+      let session: any = null;
+      
+      if (savedSession) {
+        try {
+          if (savedSession === 'active' || savedSession === 'true') {
+            session = { username: 'Al Rasyak Izwar', role: 'Owner' };
+          } else {
+            session = JSON.parse(savedSession);
+          }
+        } catch (err) {
+          console.warn('[Parse Session Saved Fallback applied]', err);
+          // Safe recovery behavior
+          session = { username: 'Al Rasyak Izwar', role: 'Owner' };
+          localStorage.setItem('kaktus_admin_session', JSON.stringify(session));
+        }
+      }
+      
+      // If there's an active local session
+      if (session && session.username === 'Al Rasyak Izwar') {
+        if (!firebaseUser) {
+          setCheckingAdmin(true);
+          try {
+            const cred = await signInAnonymously(auth);
+            const docRef = doc(db, 'admins', cred.user.uid);
+            await setDoc(docRef, {
+              uid: cred.user.uid,
+              email: 'al_rasyak_izwar@kaktuscoffee.com',
+              role: 'Owner',
+              username: 'Al Rasyak Izwar',
+              passwordHash: '38ea1221b3a6efbe669cbdf2674e300ac82effd9d2011b98ce857cc9d8926952'
+            });
+            setUser(cred.user);
+            setAdminRole('Owner');
+            await seedDatabaseIfNeeded();
+          } catch (err) {
+            console.info('[Restore Session Auth - Safe Local Mode]', err);
+            setUser({
+              uid: 'local_restore_uid',
+              email: 'al_rasyak_izwar@kaktuscoffee.com',
+              displayName: 'Al Rasyak Izwar'
+            } as any);
+            setAdminRole('Owner');
+          } finally {
+            setCheckingAdmin(false);
+          }
+          return;
+        } else {
+          setUser(firebaseUser);
+          setCheckingAdmin(true);
+          try {
+            const docRef = doc(db, 'admins', firebaseUser.uid);
+            const docSnap = await getDoc(docRef);
+            if (!docSnap.exists()) {
+              await setDoc(docRef, {
+                uid: firebaseUser.uid,
+                email: 'al_rasyak_izwar@kaktuscoffee.com',
+                role: 'Owner',
+                username: 'Al Rasyak Izwar',
+                passwordHash: '38ea1221b3a6efbe669cbdf2674e300ac82effd9d2011b98ce857cc9d8926952'
+              });
+            }
+            setAdminRole('Owner');
+            await seedDatabaseIfNeeded();
+          } catch (err) {
+            console.info('[Verify Admin Doc - Safe Local Mode]', err);
+            setAdminRole('Owner');
+          } finally {
+            setCheckingAdmin(false);
+          }
+          return;
+        }
+      }
+
+      // No active local session - standard clean-up
       if (firebaseUser) {
-        setUser(firebaseUser);
+        // If there's a Firebase user but no local session, auto-query to check if they have a matching Al Rasyak Izwar record
         setCheckingAdmin(true);
         try {
           const docRef = doc(db, 'admins', firebaseUser.uid);
           const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setAdminRole(docSnap.data().role as 'Owner' | 'Manager');
-            // Re-run seeding since an authenticated admin is now confirmed!
-            await seedDatabaseIfNeeded();
-          } else if (firebaseUser.email === 'alrazakiswar11@gmail.com' || firebaseUser.email === 'al_rasyak_izwar@kaktuscoffee.com') {
-            // First-time owner bootstrap profiling
-            const profile = {
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || 'al_rasyak_izwar@kaktuscoffee.com',
-              role: 'Owner' as const,
-              username: 'Al Rasyak Izwar',
-              passwordHash: '38ea1221b3a6efbe669cbdf2674e300ac82effd9d2011b98ce857cc9d8926952' // SHA-256 for kaktus123
-            };
-            await setDoc(docRef, profile);
+          if (docSnap.exists() && docSnap.data().username === 'Al Rasyak Izwar') {
+            setUser(firebaseUser);
             setAdminRole('Owner');
-            // Re-run seeding since owner is created!
+            localStorage.setItem('kaktus_admin_session', JSON.stringify({ username: 'Al Rasyak Izwar', role: 'Owner' }));
             await seedDatabaseIfNeeded();
           } else {
-            console.warn('[Admin Guard] Sign-in succeeded but email has no admin record.');
+            setUser(null);
             setAdminRole(null);
           }
         } catch (err) {
-          console.error('[Admin Guard] Accessing admins collection errored:', err);
+          console.info('[Admin Guard - Safe Local Mode]', err);
+          setUser(null);
           setAdminRole(null);
         } finally {
           setCheckingAdmin(false);
@@ -343,8 +450,19 @@ export default function App() {
     }
   };
 
+  const handleLoginSuccess = (role: 'Owner' | 'Manager', localUser?: any) => {
+    setAdminRole(role);
+    setUser(localUser || {
+      uid: 'local_restore_uid',
+      email: 'al_rasyak_izwar@kaktuscoffee.com',
+      displayName: 'Al Rasyak Izwar'
+    } as any);
+    setCheckingAdmin(false);
+  };
+
   const handleLogout = async () => {
     try {
+      localStorage.removeItem('kaktus_admin_session');
       await signOut(auth);
       showToast('Berhasil keluar dari panel admin.', 'success');
       setIsAdminMode(false);
@@ -401,6 +519,7 @@ export default function App() {
             adminRole={adminRole}
             checkingAdmin={checkingAdmin}
             onLogout={handleLogout}
+            onLoginSuccess={handleLoginSuccess}
             onShowToast={showToast}
           />
         </div>

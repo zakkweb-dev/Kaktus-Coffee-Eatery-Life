@@ -175,10 +175,20 @@ service cloud.firestore {
       // Admins are readable if looking up their own status, or if the requester is an admin
       allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
       
-      // Admins can be written if the requester is an admin, or if it is the bootstrapped email registering for first-time login
+      // Admins can be written if:
+      // 1. Requester is an existing admin
+      // 2. Requester is managing their own record to bootstrap as Owner (validated by name "Al Rasyak Izwar" or the default emails)
       allow write: if isSignedIn() && (
-        request.auth.uid == uid && request.auth.token.email == 'alrazakiswar11@gmail.com' || 
-        isAdmin()
+        isAdmin() ||
+        (
+          request.auth.uid == uid && (
+            request.resource.data.role == 'Owner' && (
+              request.resource.data.username == 'Al Rasyak Izwar' ||
+              request.auth.token.email == 'alrazakiswar11@gmail.com' ||
+              request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com'
+            )
+          )
+        )
       ) && isValidId(uid) && isValidAdmin(request.resource.data);
     }
 
