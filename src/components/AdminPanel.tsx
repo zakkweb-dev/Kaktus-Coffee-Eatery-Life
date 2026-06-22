@@ -11,6 +11,7 @@ import {
   collection, 
   doc, 
   setDoc, 
+  updateDoc,
   deleteDoc, 
   getDocs,
   getDoc,
@@ -560,7 +561,7 @@ export default function AdminPanel({
 
   const handleApproveReview = async (id: string, customerName: string) => {
     try {
-      await setDoc(doc(db, 'reviews', id), { status: 'approved' }, { merge: true });
+      await updateDoc(doc(db, 'reviews', id), { status: 'approved' });
       onShowToast(`Ulasan dari "${customerName}" berhasil disetujui!`, 'success');
     } catch (err) {
       console.error('[Admin Panel] Error approving review:', err);
