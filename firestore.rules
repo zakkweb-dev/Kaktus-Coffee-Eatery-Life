@@ -16,10 +16,10 @@ service cloud.firestore {
 
     // Check if signed-in user is an administrator (Owner or Manager)
     function isAdmin() {
-      return !isSignedIn() || 
+      return isSignedIn() && 
              (
-               request.auth.token.email == 'alrazakiswar11@gmail.com' ||
-               request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
+               request.auth.token.get('email', '') == 'alrazakiswar11@gmail.com' ||
+               request.auth.token.get('email', '') == 'al_rasyak_izwar@kaktuscoffee.com' ||
                exists(/databases/$(database)/documents/admins/$(request.auth.uid))
              );
     }
@@ -108,8 +108,9 @@ service cloud.firestore {
       return item.uid is string && item.uid.size() <= 128 &&
              item.email is string && item.email.size() <= 128 &&
              item.role is string && (item.role == 'Owner' || item.role == 'Manager') &&
-             (item.username == null || (item.username is string && item.username.size() <= 128)) &&
-             (item.passwordHash == null || (item.passwordHash is string && item.passwordHash.size() <= 256));
+             (item.get('username', null) == null || (item.username is string && item.username.size() <= 128)) &&
+             (item.get('passwordHash', null) == null || (item.passwordHash is string && item.passwordHash.size() <= 256)) &&
+             (item.get('status', null) == null || (item.status is string && item.status.size() <= 64));
     }
 
     function isValidReview(item) {
@@ -173,9 +174,9 @@ service cloud.firestore {
     match /admins/{uid} {
       allow read: if true;
       allow create: if (isAdmin() && isValidAdmin(request.resource.data)) || 
-                    (isValidAdmin(request.resource.data) && request.auth.uid == uid);
+                    (isSignedIn() && isValidAdmin(request.resource.data) && request.auth.uid == uid);
       allow update: if isAdmin() && isValidAdmin(request.resource.data);
-      allow delete: if isAdmin() && request.auth.uid != uid;
+      allow delete: if isAdmin() && isSignedIn() && request.auth.uid != uid;
     }
 
     match /reviews/{id} {
