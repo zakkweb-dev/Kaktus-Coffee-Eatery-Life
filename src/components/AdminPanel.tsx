@@ -21,7 +21,8 @@ import {
 import { 
   ShieldCheck, LogOut, LayoutGrid, Package, Calendar, Image as ImageIcon, 
   Settings, Plus, Edit, Trash2, Database, Sliders, Cake, RefreshCw, Key,
-  UserPlus, ShieldAlert, Loader2, Upload, MessageSquare, ExternalLink, Users, Star, Check, Trash, Clock, CheckCircle2
+  UserPlus, ShieldAlert, Loader2, Upload, MessageSquare, ExternalLink, Users, Star, Check, Trash, Clock, CheckCircle2,
+  Eye, EyeOff
 } from 'lucide-react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Review, Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, HeroBanner, CustomCake, AdminCredentials } from '../types';
@@ -124,6 +125,9 @@ export default function AdminPanel({
   const [newManagerUsername, setNewManagerUsername] = useState('');
   const [newManagerPassword, setNewManagerPassword] = useState('');
   const [addManagerLoading, setAddManagerLoading] = useState(false);
+  const [editingManagerUid, setEditingManagerUid] = useState<string | null>(null);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showManagerPassword, setShowManagerPassword] = useState(false);
 
   // Global upload process indicator
   const [uploadProgress, setUploadProgress] = useState(false);
@@ -632,25 +636,31 @@ export default function AdminPanel({
     }
   };
 
-  // Safe registration of alternative manager accounts by the Owner (Zero-LogOut)
+  // Safe registration or updating of alternative manager accounts by the Owner (Zero-LogOut)
   const handleAddManager = async (e: React.FormEvent) => {
     e.preventDefault();
     if (adminRole !== 'Owner') {
-      onShowToast('Hanya Owner yang berhak mendaftarkan Manager baru.', 'error');
+      onShowToast('Hanya Owner yang berhak mengelola akun Manager.', 'error');
       return;
     }
-    if (!newManagerUsername.trim() || !newManagerPassword.trim()) {
-      onShowToast('Username dan kata sandi wajib diisi!', 'error');
+    const rawUsername = newManagerUsername.trim();
+    if (!rawUsername) {
+      onShowToast('Username wajib diisi!', 'error');
+      return;
+    }
+    // Password is only mandatory when creating a new manager
+    if (!editingManagerUid && !newManagerPassword.trim()) {
+      onShowToast('Kata sandi wajib diisi untuk pendaftaran baru!', 'error');
       return;
     }
 
     setAddManagerLoading(true);
     try {
-      const rawUsername = newManagerUsername.trim();
-      
-      // Strict dry-run unique username validation
+      // Unique check (exclude self if editing)
       const usernameExists = teamAdmins.some(
-        (adm: any) => adm.username && adm.username.toLowerCase().trim() === rawUsername.toLowerCase().trim()
+        (adm: any) => adm.username && 
+                     adm.username.toLowerCase().trim() === rawUsername.toLowerCase().trim() &&
+                     (!editingManagerUid || adm.uid !== editingManagerUid)
       );
       if (usernameExists) {
         onShowToast(`Username "${rawUsername}" sudah terdaftar sebagai administrator!`, 'error');
@@ -659,11 +669,20 @@ export default function AdminPanel({
       }
 
       const pseudoEmail = getPseudoEmail(rawUsername);
-      const pwHash = await hashPassword(newManagerPassword);
+      
+      let pwHash = '';
+      if (newManagerPassword.trim()) {
+        pwHash = await hashPassword(newManagerPassword);
+      } else if (editingManagerUid) {
+        // Retrieve existing passwordHash
+        const existing = teamAdmins.find((adm: any) => adm.uid === editingManagerUid);
+        if (existing) {
+          pwHash = existing.passwordHash || '';
+        }
+      }
 
-      // Create manager document directly in Firestore to bypass restricted email/password provider registration
-      const managerUid = `manager_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-      const newMgr = {
+      const managerUid = editingManagerUid || `manager_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const mgrData = {
         uid: managerUid,
         email: pseudoEmail,
         username: rawUsername,
@@ -671,10 +690,19 @@ export default function AdminPanel({
         passwordHash: pwHash
       };
 
-      // Save to offline resilient fallback catalog
+      // Sync local storage list
       try {
         const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        localAdmins.push(newMgr);
+        if (editingManagerUid) {
+          const idx = localAdmins.findIndex((adm: any) => adm.uid === editingManagerUid);
+          if (idx !== -1) {
+            localAdmins[idx] = mgrData;
+          } else {
+            localAdmins.push(mgrData);
+          }
+        } else {
+          localAdmins.push(mgrData);
+        }
         localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
       } catch (localStoreErr) {
         console.warn('[Local Admins Sync Warning]', localStoreErr);
@@ -682,25 +710,35 @@ export default function AdminPanel({
 
       let dbSuccess = true;
       try {
-        await setDoc(doc(db, 'admins', managerUid), newMgr);
+        await setDoc(doc(db, 'admins', managerUid), mgrData);
       } catch (dbErr) {
-        console.warn('[Add Manager Firestore - Save cached locally only]', dbErr);
+        console.warn('[Add/Edit Manager Firestore - Save cached locally only]', dbErr);
         dbSuccess = false;
       }
 
-      if (dbSuccess) {
-        onShowToast(`Manager "${rawUsername}" berhasil ditambahkan secara aman ke server!`, 'success');
+      if (editingManagerUid) {
+        if (dbSuccess) {
+          onShowToast(`Akun Manager "${rawUsername}" berhasil diperbarui ke server!`, 'success');
+        } else {
+          onShowToast(`Akun Manager "${rawUsername}" diperbarui di penyimpanan lokal.`, 'success');
+        }
       } else {
-        onShowToast(`Manager "${rawUsername}" disimpan lokal secara mandiri.`, 'success');
+        if (dbSuccess) {
+          onShowToast(`Manager "${rawUsername}" berhasil ditambahkan secara aman ke server!`, 'success');
+        } else {
+          onShowToast(`Manager "${rawUsername}" disimpan lokal secara mandiri.`, 'success');
+        }
       }
 
+      // Reset form
       setNewManagerUsername('');
       setNewManagerPassword('');
+      setEditingManagerUid(null);
       fetchTeamAdmins();
     } catch (err: any) {
-      console.warn('[Add Manager Secure Session]', err);
+      console.warn('[Add/Edit Manager Secure Session]', err);
       try { handleFirestoreError(err, OperationType.WRITE, 'admins'); } catch (e) {}
-      onShowToast(err.message || 'Gagal menambahkan Manager baru.', 'error');
+      onShowToast(err.message || 'Gagal menyimpan akun Manager.', 'error');
     } finally {
       setAddManagerLoading(false);
     }
@@ -871,15 +909,25 @@ export default function AdminPanel({
 
             <div className="space-y-1">
               <label className="text-[10px] text-gray-400 font-mono uppercase tracking-widest block" htmlFor="auth-password">Sandi Akun</label>
-              <input
-                id="auth-password"
-                type="password"
-                required
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="Masukkan sandi..."
-              />
+              <div className="relative">
+                <input
+                  id="auth-password"
+                  type={showLoginPassword ? "text" : "password"}
+                  required
+                  className="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-10 py-2.5 text-xs text-white font-mono"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="Masukkan sandi..."
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowLoginPassword(!showLoginPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors duration-150 p-1 rounded-full focus:outline-none focus:ring-1 focus:ring-accent-gold flex items-center justify-center"
+                  title={showLoginPassword ? "Sembunyikan sandi" : "Tampilkan sandi"}
+                >
+                  {showLoginPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -2330,14 +2378,14 @@ export default function AdminPanel({
                 <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
                   Kelola Akun Manager
                 </h3>
-                <p className="text-xs text-slate-400">Daftarkan akun administrator bertipe Manager baru atau berhentikan hak akses secara real-time.</p>
+                <p className="text-xs text-slate-400">Daftarkan akun administrator bertipe Manager baru, edit kredensial, atau berhentikan hak akses secara real-time.</p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-                {/* Form to add Manager */}
+                {/* Form to add/edit Manager */}
                 <form onSubmit={handleAddManager} className="lg:col-span-5 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
                   <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-1.5">
-                    👥 Registrasikan Manager Baru
+                    👥 {editingManagerUid ? 'Edit Akun Manager' : 'Registrasikan Manager Baru'}
                   </h4>
 
                   <div className="space-y-3">
@@ -2355,16 +2403,28 @@ export default function AdminPanel({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="mgr-password">Kata Sandi Baru</label>
-                      <input
-                        id="mgr-password"
-                        type="password"
-                        required
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
-                        value={newManagerPassword}
-                        onChange={(e) => setNewManagerPassword(e.target.value)}
-                        placeholder="Tentukan sandi login..."
-                      />
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="mgr-password">
+                        {editingManagerUid ? 'Kata Sandi Baru (Kosongkan jika tidak diubah)' : 'Kata Sandi Baru'}
+                      </label>
+                      <div className="relative">
+                        <input
+                          id="mgr-password"
+                          type={showManagerPassword ? "text" : "password"}
+                          required={!editingManagerUid}
+                          className="w-full bg-white/5 border border-white/10 rounded-xl pl-4 pr-10 py-2.5 text-xs text-white font-mono"
+                          value={newManagerPassword}
+                          onChange={(e) => setNewManagerPassword(e.target.value)}
+                          placeholder={editingManagerUid ? "Kosongkan jika sandi tetap..." : "Tentukan sandi login..."}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowManagerPassword(!showManagerPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white transition-colors duration-150 p-1 rounded-full focus:outline-none focus:ring-1 focus:ring-accent-gold flex items-center justify-center"
+                          title={showManagerPassword ? "Sembunyikan sandi" : "Tampilkan sandi"}
+                        >
+                          {showManagerPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
                     </div>
 
                     <p className="text-[10px] text-gray-500 leading-normal">
@@ -2379,9 +2439,23 @@ export default function AdminPanel({
                       {addManagerLoading ? (
                         <Loader2 className="animate-spin text-elegant-green-950" size={14} />
                       ) : (
-                        'Daftarkan Akun Manager'
+                        editingManagerUid ? 'Simpan Perubahan Akun' : 'Daftarkan Akun Manager'
                       )}
                     </button>
+
+                    {editingManagerUid && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingManagerUid(null);
+                          setNewManagerUsername('');
+                          setNewManagerPassword('');
+                        }}
+                        className="w-full bg-white/5 hover:bg-white/10 text-white font-display text-[10px] uppercase font-bold tracking-widest py-2.5 rounded-xl flex items-center justify-center gap-1.5 duration-200 mt-1"
+                      >
+                        Batal Edit
+                      </button>
+                    )}
                   </div>
                 </form>
 
@@ -2422,12 +2496,24 @@ export default function AdminPanel({
                               </td>
                               <td className="px-4 py-3 text-right">
                                 {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
-                                  <button
-                                    onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
-                                    className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all"
-                                  >
-                                    Cabut Akses
-                                  </button>
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => {
+                                        setEditingManagerUid(adm.uid);
+                                        setNewManagerUsername(adm.username || '');
+                                        setNewManagerPassword('');
+                                      }}
+                                      className="bg-accent-gold/10 hover:bg-accent-gold text-accent-gold hover:text-elegant-green-950 text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
+                                      className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all"
+                                    >
+                                      Cabut Akses
+                                    </button>
+                                  </div>
                                 ) : (
                                   <span className="text-[10px] text-gray-500 italic">Sistem Utama</span>
                                 )}

@@ -161,8 +161,12 @@ export default function App() {
             setAdminRole(session.role || 'Manager');
             console.log(`[Admin Auth Logging] Silent anonymous authorization successful. UID: ${cred.user.uid}`);
             await seedDatabaseIfNeeded();
-          } catch (err) {
-            console.error('[Admin Auth Logging] Silent anonymous authorization failed (falling back to secure local mode):', err);
+          } catch (err: any) {
+            if (err?.code === 'auth/admin-restricted-operation' || err?.message?.includes('admin-restricted-operation')) {
+              console.warn('[Admin Auth Logging] Silent anonymous authorization is restricted/disabled by Firebase administration config. Proceeding securely in local offline mode.');
+            } else {
+              console.error('[Admin Auth Logging] Silent anonymous authorization failed (falling back to secure local mode):', err);
+            }
             setUser({
               uid: 'local_restore_uid',
               email: isBootstrapOwner ? 'al_rasyak_izwar@kaktuscoffee.com' : `${session.username.toLowerCase().replace(/[^a-z0-9]/g, '_')}@kaktuscoffee.com`,
