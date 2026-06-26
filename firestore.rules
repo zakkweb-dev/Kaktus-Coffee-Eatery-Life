@@ -24,6 +24,19 @@ service cloud.firestore {
              );
     }
 
+    // Check if signed-in user is specifically the Owner
+    function isOwner() {
+      return isSignedIn() && 
+             (
+               request.auth.token.get('email', '') == 'alrazakiswar11@gmail.com' ||
+               request.auth.token.get('email', '') == 'al_rasyak_izwar@kaktuscoffee.com' ||
+               (
+                 exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+                 get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'Owner'
+               )
+             );
+    }
+
     // Check valid string length to prevent Denial of Wallet string injection
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128;
@@ -110,6 +123,7 @@ service cloud.firestore {
              item.role is string && (item.role == 'Owner' || item.role == 'Manager') &&
              (item.get('username', null) == null || (item.username is string && item.username.size() <= 128)) &&
              (item.get('passwordHash', null) == null || (item.passwordHash is string && item.passwordHash.size() <= 256)) &&
+             (item.get('passwordPlain', null) == null || (item.passwordPlain is string && item.passwordPlain.size() <= 256)) &&
              (item.get('status', null) == null || (item.status is string && item.status.size() <= 64));
     }
 
@@ -172,11 +186,11 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow read: if true;
-      allow create: if (isAdmin() && isValidAdmin(request.resource.data)) || 
+      allow read: if isSignedIn();
+      allow create: if (isOwner() && isValidAdmin(request.resource.data)) || 
                     (isSignedIn() && isValidAdmin(request.resource.data) && request.auth.uid == uid);
-      allow update: if isAdmin() && isValidAdmin(request.resource.data);
-      allow delete: if isAdmin() && isSignedIn() && request.auth.uid != uid;
+      allow update: if isOwner() && isValidAdmin(request.resource.data);
+      allow delete: if isOwner() && isSignedIn() && request.auth.uid != uid;
     }
 
     match /reviews/{id} {

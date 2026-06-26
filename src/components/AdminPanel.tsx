@@ -24,7 +24,7 @@ import {
   ShieldCheck, LogOut, LayoutGrid, Package, Calendar, Image as ImageIcon, 
   Settings, Plus, Edit, Trash2, Database, Sliders, Cake, RefreshCw, Key,
   UserPlus, ShieldAlert, Loader2, Upload, MessageSquare, ExternalLink, Users, Star, Check, Trash, Clock, CheckCircle2,
-  Eye, EyeOff
+  Eye, EyeOff, Copy
 } from 'lucide-react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { Review, Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, HeroBanner, CustomCake, AdminCredentials } from '../types';
@@ -130,11 +130,16 @@ export default function AdminPanel({
   const [editingManagerUid, setEditingManagerUid] = useState<string | null>(null);
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showManagerPassword, setShowManagerPassword] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
 
   // States for Resetting Manager Password
   const [resettingManagerUid, setResettingManagerUid] = useState<string | null>(null);
   const [resetPasswordValue, setResetPasswordValue] = useState('');
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+
+  // States for Deleting Manager Account (Owner Only)
+  const [deletingAdminInfo, setDeletingAdminInfo] = useState<{ uid: string; email: string; username: string } | null>(null);
+  const [deleteAdminLoading, setDeleteAdminLoading] = useState(false);
 
   // States for Testing Login
   const [testingLoginUid, setTestingLoginUid] = useState<string | null>(null);
@@ -199,10 +204,6 @@ export default function AdminPanel({
   // Fetch administrator team list (Owner view only)
   const fetchTeamAdmins = async () => {
     if (adminRole !== 'Owner') return;
-    if (!auth.currentUser) {
-      console.warn('[Admin Panel] Skipping fetchTeamAdmins: No active Firebase Auth session.');
-      return;
-    }
     setLoadingTeam(true);
     try {
       const snap = await getDocs(collection(db, 'admins'));
@@ -229,7 +230,27 @@ export default function AdminPanel({
 
   React.useEffect(() => {
     if ((activeTab === 'settings' || activeTab === 'admins') && adminRole === 'Owner') {
-      fetchTeamAdmins();
+      setLoadingTeam(true);
+      const unsub = onSnapshot(collection(db, 'admins'), (snap) => {
+        const list: any[] = [];
+        const seenUsernames = new Set<string>();
+        snap.forEach(doc => {
+          const data = doc.data();
+          if (data.username) {
+            const lowerName = data.username.toLowerCase().trim();
+            if (!seenUsernames.has(lowerName)) {
+              seenUsernames.add(lowerName);
+              list.push(data);
+            }
+          }
+        });
+        setTeamAdmins(list);
+        setLoadingTeam(false);
+      }, (err) => {
+        console.warn('[Admin Panel] Failed to subscribe to admin list:', err);
+        setLoadingTeam(false);
+      });
+      return () => unsub();
     }
   }, [activeTab, adminRole, user]);
 
@@ -762,6 +783,15 @@ export default function AdminPanel({
       const existing = teamAdmins.find((adm: any) => adm.uid === editingManagerUid);
       const currentStatus = existing?.status || 'Aktif';
 
+      let plainPw = '';
+      if (newManagerPassword.trim()) {
+        plainPw = newManagerPassword;
+      } else if (editingManagerUid) {
+        if (existing) {
+          plainPw = existing.passwordPlain || '';
+        }
+      }
+
       const managerUid = editingManagerUid || `manager_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const mgrData = {
         uid: managerUid,
@@ -769,6 +799,7 @@ export default function AdminPanel({
         username: rawUsername,
         role: 'Manager',
         passwordHash: pwHash,
+        passwordPlain: plainPw,
         status: currentStatus
       };
 
@@ -800,37 +831,44 @@ export default function AdminPanel({
   };
 
   // Safe deletion of admin managers (Owner only)
-  const handleDeleteAdmin = async (targetUid: string, email: string) => {
-    if (email === 'alrazakiswar11@gmail.com' || email === 'al_rasyak_izwar@kaktuscoffee.com') {
-      onShowToast('Pemegang saham utama (Owner) tidak dapat dinonaktifkan!', 'error');
+  const performDeleteAdmin = async (targetUid: string, email: string) => {
+    if (adminRole !== 'Owner') {
+      onShowToast('Hanya Owner yang berhak menghapus akun manager.', 'error');
       return;
     }
-    if (confirm(`Cabut otorisasi admin untuk pengguna "${email}"?`)) {
-      try {
-        // Enforce cascading deletion of all session references for this administrator
-        const snap = await getDocs(collection(db, 'admins'));
-        const batch = writeBatch(db);
-        let deletedSome = false;
-        
-        snap.forEach(d => {
-          const data = d.data();
-          if (data.email === email) {
-            batch.delete(doc(db, 'admins', d.id));
-            deletedSome = true;
-          }
-        });
-        
-        await deleteDoc(doc(db, 'admins', targetUid)); // fallback
-        if (deletedSome) {
-          await batch.commit();
+    if (email === 'alrazakiswar11@gmail.com' || email === 'al_rasyak_izwar@kaktuscoffee.com') {
+      onShowToast('Akun Owner tidak boleh dihapus!', 'error');
+      return;
+    }
+    setDeleteAdminLoading(true);
+    try {
+      // Enforce cascading deletion of all session references for this administrator
+      const snap = await getDocs(collection(db, 'admins'));
+      const batch = writeBatch(db);
+      let deletedSome = false;
+      
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.email === email) {
+          batch.delete(doc(db, 'admins', d.id));
+          deletedSome = true;
         }
-        onShowToast(`Hak admin untuk "${email}" berhasil dicabut dari server database.`, 'success');
-        fetchTeamAdmins();
-      } catch (err: any) {
-        console.error('[Firestore Delete Admin Error]', err);
-        try { handleFirestoreError(err, OperationType.DELETE, `admins/${targetUid}`); } catch (e) {}
-        onShowToast(`Gagal mencabut hak admin: ${err.message || err}`, 'error');
-      }
+      });
+      
+      // Also delete target document if it has a different ID
+      batch.delete(doc(db, 'admins', targetUid));
+      
+      await batch.commit();
+      
+      onShowToast('Akun manager berhasil dihapus', 'success');
+      setDeletingAdminInfo(null);
+      fetchTeamAdmins();
+    } catch (err: any) {
+      console.error('[Firestore Delete Admin Error]', err);
+      try { handleFirestoreError(err, OperationType.DELETE, `admins/${targetUid}`); } catch (e) {}
+      onShowToast(`Gagal menghapus akun manager: ${err.message || err}`, 'error');
+    } finally {
+      setDeleteAdminLoading(false);
     }
   };
 
@@ -871,7 +909,7 @@ export default function AdminPanel({
       }
 
       const pwHash = await hashPassword(resetPasswordValue);
-      const updatedAdmin = { ...targetAdmin, passwordHash: pwHash };
+      const updatedAdmin = { ...targetAdmin, passwordHash: pwHash, passwordPlain: resetPasswordValue };
 
       // Sync Firebase
       await setDoc(doc(db, 'admins', resettingManagerUid), updatedAdmin);
@@ -2611,14 +2649,16 @@ export default function AdminPanel({
                         <thead className="bg-white/5 text-gray-200 font-mono text-[9px] uppercase tracking-wider border-b border-white/5">
                           <tr>
                             <th className="px-4 py-2">Identitas</th>
+                            <th className="px-4 py-2">Kata Sandi</th>
                             <th className="px-4 py-2">Peran</th>
                             <th className="px-4 py-2">Status</th>
-                            <th className="px-4 py-2 text-right">Opsi</th>
+                            <th className="px-4 py-2 text-right">Aksi</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
                           {teamAdmins.map((adm, index) => {
                             const isStatusAktif = adm.status !== 'Nonaktif';
+                            const isOwner = adm.role === 'Owner' || adm.email === 'alrazakiswar11@gmail.com' || adm.email === 'al_rasyak_izwar@kaktuscoffee.com';
                             return (
                               <tr key={adm.uid || index} className="hover:bg-white/[0.01]">
                                 <td className="px-4 py-3 text-white">
@@ -2628,34 +2668,57 @@ export default function AdminPanel({
                                   </div>
                                 </td>
                                 <td className="px-4 py-3">
+                                  {isOwner ? (
+                                    <span className="text-[10px] text-gray-500 italic">Terproteksi</span>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5 font-mono text-[11px] text-gray-300">
+                                      <span>{visiblePasswords[adm.uid] ? (adm.passwordPlain || '••••••••') : '••••••••'}</span>
+                                      {adm.passwordPlain && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => setVisiblePasswords(prev => ({ ...prev, [adm.uid]: !prev[adm.uid] }))}
+                                            className="text-gray-500 hover:text-white transition-colors p-0.5"
+                                            title={visiblePasswords[adm.uid] ? "Sembunyikan Sandi" : "Tampilkan Sandi"}
+                                          >
+                                            {visiblePasswords[adm.uid] ? <EyeOff size={11} /> : <Eye size={11} />}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(`Username: ${adm.username}\nSandi: ${adm.passwordPlain}`);
+                                              onShowToast(`Kredensial untuk "${adm.username}" disalin ke papan klip!`, 'success');
+                                            }}
+                                            className="text-gray-500 hover:text-white transition-colors p-0.5"
+                                            title="Salin Kredensial"
+                                          >
+                                            <Copy size={11} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3">
                                   <span className="bg-accent-gold/20 text-accent-gold text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold">
                                     {adm.role}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
-                                  {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleToggleAdminStatus(adm)}
-                                      title="Klik untuk mengubah status"
-                                      className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold transition-all flex items-center gap-1.5 ${
-                                        isStatusAktif
-                                          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
-                                          : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                                      }`}
-                                    >
-                                      <span className={`w-1.5 h-1.5 rounded-full ${isStatusAktif ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-                                      {isStatusAktif ? 'Aktif' : 'Nonaktif'}
-                                    </button>
-                                  ) : (
+                                  {isStatusAktif ? (
                                     <span className="bg-emerald-500/20 text-emerald-400 text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1.5 w-max">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                                       Aktif
+                                    </span>
+                                  ) : (
+                                    <span className="bg-red-500/20 text-red-400 text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1.5 w-max">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                                      Nonaktif
                                     </span>
                                   )}
                                 </td>
                                 <td className="px-4 py-3 text-right">
-                                  {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
+                                  {!isOwner ? (
                                     <div className="flex flex-wrap items-center justify-end gap-1.5">
                                       <button
                                         type="button"
@@ -2677,30 +2740,30 @@ export default function AdminPanel({
                                         className="bg-purple-500/10 hover:bg-purple-500 text-purple-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
                                         title="Reset Sandi"
                                       >
-                                        Sandi
+                                        Reset Password
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setTestingLoginUid(adm.uid);
-                                          setTestPasswordValue('');
-                                          setTestLoginResult(null);
-                                        }}
-                                        className="bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
-                                        title="Uji coba login akun manager"
+                                        onClick={() => handleToggleAdminStatus(adm)}
+                                        className={`${
+                                          isStatusAktif
+                                            ? 'bg-orange-500/10 hover:bg-orange-500 text-orange-400 hover:text-white'
+                                            : 'bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white'
+                                        } text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold`}
+                                        title="Ubah Status Aktif/Nonaktif"
                                       >
-                                        Tes
+                                        {isStatusAktif ? 'Nonaktifkan' : 'Aktifkan'}
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
+                                        onClick={() => setDeletingAdminInfo({ uid: adm.uid, email: adm.email, username: adm.username || 'Manager' })}
                                         className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
                                       >
                                         Hapus
                                       </button>
                                     </div>
                                   ) : (
-                                    <span className="text-[10px] text-gray-500 italic">Sistem Utama</span>
+                                    <span className="text-[10px] text-gray-500 italic">Sistem Utama (Owner)</span>
                                   )}
                                 </td>
                               </tr>
@@ -2753,6 +2816,46 @@ export default function AdminPanel({
                         </button>
                       </div>
                     </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Delete Confirmation Modal Overlay */}
+              {deletingAdminInfo && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-[#1c0d0d] border border-red-500/20 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl text-center">
+                    <div className="mx-auto h-12 w-12 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 text-xl">
+                      ⚠️
+                    </div>
+                    <div className="space-y-2">
+                      <h3 className="font-display text-sm font-bold text-red-400 uppercase tracking-widest">
+                        Hapus Akun Manager
+                      </h3>
+                      <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                        Apakah Anda yakin ingin menghapus akun manager ini? Akun yang dihapus tidak akan dapat digunakan untuk login lagi.
+                      </p>
+                      <div className="text-[10px] font-mono text-red-500/70 bg-red-950/20 py-1.5 px-3 rounded-lg border border-red-500/10 inline-block">
+                        {deletingAdminInfo.username} ({deletingAdminInfo.email})
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeletingAdminInfo(null)}
+                        disabled={deleteAdminLoading}
+                        className="flex-1 bg-white/5 hover:bg-white/10 text-white font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors border border-white/10"
+                      >
+                        Batal
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => performDeleteAdmin(deletingAdminInfo.uid, deletingAdminInfo.email)}
+                        disabled={deleteAdminLoading}
+                        className="flex-1 bg-red-600 hover:bg-red-500 text-white font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1 shadow-lg shadow-red-600/20"
+                      >
+                        {deleteAdminLoading ? <Loader2 className="animate-spin" size={12} /> : 'Ya, Hapus'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

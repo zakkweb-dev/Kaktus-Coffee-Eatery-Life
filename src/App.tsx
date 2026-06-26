@@ -273,6 +273,47 @@ export default function App() {
     return () => unsubAuth();
   }, []);
 
+  // 2.5 Real-Time Manager Access Guard (Logout immediately if deleted or deactivated in database)
+  useEffect(() => {
+    if (user && adminRole === 'Manager') {
+      const savedSession = localStorage.getItem('kaktus_admin_session');
+      if (savedSession) {
+        let currentUsername = '';
+        try {
+          const parsed = JSON.parse(savedSession);
+          currentUsername = parsed.username;
+        } catch (e) {}
+
+        if (currentUsername) {
+          const unsub = onSnapshot(collection(db, 'admins'), (snapshot) => {
+            let stillValid = false;
+            let deactivated = false;
+            snapshot.forEach((doc) => {
+              const data = doc.data();
+              if (data.username && data.username.toLowerCase().trim() === currentUsername.toLowerCase().trim()) {
+                stillValid = true;
+                if (data.status === 'Nonaktif') {
+                  deactivated = true;
+                }
+              }
+            });
+
+            if (!stillValid || deactivated) {
+              console.warn(`[Admin Real-Time Guard] Session for ${currentUsername} became invalid (deleted=${!stillValid}, deactivated=${deactivated}). Logging out.`);
+              localStorage.removeItem('kaktus_admin_session');
+              setUser(null);
+              setAdminRole(null);
+              signOut(auth);
+            }
+          }, (err) => {
+            console.warn('[Admin Real-Time Guard] Error in real-time snapshot listener:', err);
+          });
+          return () => unsub();
+        }
+      }
+    }
+  }, [user, adminRole]);
+
   // 3. Bind Live Firestore Listeners
   useEffect(() => {
     const unsubProducts = onSnapshot(collection(db, 'produk'), (snapshot) => {
