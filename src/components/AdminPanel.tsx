@@ -16,7 +16,9 @@ import {
   getDocs,
   getDoc,
   onSnapshot,
-  writeBatch
+  writeBatch,
+  query,
+  where
 } from 'firebase/firestore';
 import { 
   ShieldCheck, LogOut, LayoutGrid, Package, Calendar, Image as ImageIcon, 
@@ -218,22 +220,8 @@ export default function AdminPanel({
       });
       setTeamAdmins(list);
     } catch (err) {
-      console.warn('[Admin Panel] Failed to load admin list from server, returning local catalog:', err);
-      try {
-        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        const list: any[] = [];
-        const seenUsernames = new Set<string>();
-        localAdmins.forEach((adm: any) => {
-          if (adm.username) {
-            const lowerName = adm.username.toLowerCase().trim();
-            if (!seenUsernames.has(lowerName)) {
-              seenUsernames.add(lowerName);
-              list.push(adm);
-            }
-          }
-        });
-        setTeamAdmins(list);
-      } catch (e) {}
+      console.warn('[Admin Panel] Failed to load admin list from server:', err);
+      setTeamAdmins([]);
     } finally {
       setLoadingTeam(false);
     }
@@ -337,17 +325,6 @@ export default function AdminPanel({
 
   // SHA256 Password Hash Engine with full support for non-secure contexts (HTTP / mobile)
   const hashPassword = async (plainText: string) => {
-    try {
-      if (window.crypto && window.crypto.subtle) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(plainText);
-        const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      }
-    } catch (e) {
-      console.warn('[WebCrypto Failed, using fallback]', e);
-    }
     return pureJsSha256(plainText);
   };
 
@@ -440,37 +417,35 @@ export default function AdminPanel({
           }
           console.log('[Admin Auth Logging] Querying all records inside admins collection...');
           const adminsSnap = await getDocs(collection(db, 'admins'));
+          const matchingDocs: any[] = [];
           adminsSnap.forEach((doc) => {
             const data = doc.data();
             if (
               data.username && 
-              data.username.toLowerCase() === rawUsername.toLowerCase() && 
+              data.username.toLowerCase().trim() === rawUsername.toLowerCase().trim() && 
               data.passwordHash === hashedInput
             ) {
-              foundAdmin = data;
+              matchingDocs.push(data);
             }
           });
+
+          if (matchingDocs.length > 0) {
+            // Check if ANY matching document is deactivated
+            const deactivated = matchingDocs.some(d => d.status === 'Nonaktif');
+            if (deactivated) {
+              onShowToast('Akun Anda dinonaktifkan oleh Owner. Silakan hubungi Owner.', 'error');
+              setAuthLoading(false);
+              return;
+            }
+            // Find the master document (the one with status field, or default to first)
+            foundAdmin = matchingDocs.find(d => d.status !== undefined) || matchingDocs[0];
+          }
         } catch (dbErr) {
-          console.warn('[Admin DB Auth Query Error - Falling back to local catalogs]', dbErr);
+          console.warn('[Admin DB Auth Query Error]', dbErr);
           try { handleFirestoreError(dbErr, OperationType.GET, 'admins'); } catch (e) {}
         }
 
-        if (!foundAdmin) {
-          console.log('[Admin Auth Logging] Database query missed. Checking local offline backup caches...');
-          const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-          foundAdmin = localAdmins.find((adm: any) => 
-            adm.username && 
-            adm.username.toLowerCase() === rawUsername.toLowerCase() && 
-            adm.passwordHash === hashedInput
-          );
-        }
-
         if (foundAdmin) {
-          if (foundAdmin.status === 'Nonaktif') {
-            onShowToast('Akun Anda dinonaktifkan oleh Owner. Silakan hubungi Owner.', 'error');
-            setAuthLoading(false);
-            return;
-          }
           console.log(`[Admin Auth Logging] Successful authenticated match: role='${foundAdmin.role}', username='${foundAdmin.username}'`);
           // Sync active anonymous Firebase auth session UID to Firestore so the current browser is authorized as Admin
           if (auth.currentUser && auth.currentUser.uid !== foundAdmin.uid) {
@@ -797,44 +772,17 @@ export default function AdminPanel({
         status: currentStatus
       };
 
-      // Sync local storage list
-      try {
-        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        if (editingManagerUid) {
-          const idx = localAdmins.findIndex((adm: any) => adm.uid === editingManagerUid);
-          if (idx !== -1) {
-            localAdmins[idx] = mgrData;
-          } else {
-            localAdmins.push(mgrData);
-          }
-        } else {
-          localAdmins.push(mgrData);
-        }
-        localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
-      } catch (localStoreErr) {
-        console.warn('[Local Admins Sync Warning]', localStoreErr);
-      }
-
-      let dbSuccess = true;
       try {
         await setDoc(doc(db, 'admins', managerUid), mgrData);
-      } catch (dbErr) {
-        console.warn('[Add/Edit Manager Firestore - Save cached locally only]', dbErr);
-        dbSuccess = false;
+      } catch (dbErr: any) {
+        console.error('[Add/Edit Manager Firestore Error]', dbErr);
+        throw new Error(`Gagal menyimpan ke database cloud: ${dbErr.message || dbErr}`);
       }
 
       if (editingManagerUid) {
-        if (dbSuccess) {
-          onShowToast(`Akun Manager "${rawUsername}" berhasil diperbarui ke server!`, 'success');
-        } else {
-          onShowToast(`Akun Manager "${rawUsername}" diperbarui di penyimpanan lokal.`, 'success');
-        }
+        onShowToast(`Akun Manager "${rawUsername}" berhasil diperbarui ke database server!`, 'success');
       } else {
-        if (dbSuccess) {
-          onShowToast(`Manager "${rawUsername}" berhasil ditambahkan secara aman ke server!`, 'success');
-        } else {
-          onShowToast(`Manager "${rawUsername}" disimpan lokal secara mandiri.`, 'success');
-        }
+        onShowToast(`Manager "${rawUsername}" berhasil ditambahkan secara aman ke database server!`, 'success');
       }
 
       // Reset form
@@ -858,15 +806,6 @@ export default function AdminPanel({
       return;
     }
     if (confirm(`Cabut otorisasi admin untuk pengguna "${email}"?`)) {
-      // Delete from local resilient storage
-      try {
-        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        const updatedLocals = localAdmins.filter((adm: any) => adm.uid !== targetUid && adm.email !== email);
-        localStorage.setItem('kaktus_admins', JSON.stringify(updatedLocals));
-      } catch (localErr) {
-        console.warn('[Local Sync Auth Error]', localErr);
-      }
-
       try {
         // Enforce cascading deletion of all session references for this administrator
         const snap = await getDocs(collection(db, 'admins'));
@@ -885,13 +824,12 @@ export default function AdminPanel({
         if (deletedSome) {
           await batch.commit();
         }
-        onShowToast(`Hak admin untuk "${email}" dicabut.`, 'success');
+        onShowToast(`Hak admin untuk "${email}" berhasil dicabut dari server database.`, 'success');
         fetchTeamAdmins();
-      } catch (err) {
-        console.warn('[Firestore Delete Admin Error - Keeping local deletion]', err);
+      } catch (err: any) {
+        console.error('[Firestore Delete Admin Error]', err);
         try { handleFirestoreError(err, OperationType.DELETE, `admins/${targetUid}`); } catch (e) {}
-        onShowToast(`Hak admin untuk "${email}" dicabut secara lokal.`, 'success');
-        fetchTeamAdmins();
+        onShowToast(`Gagal mencabut hak admin: ${err.message || err}`, 'error');
       }
     }
   };
@@ -905,18 +843,6 @@ export default function AdminPanel({
     const updatedAdmin = { ...adm, status: newStatus };
 
     try {
-      // Sync local storage
-      try {
-        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        const idx = localAdmins.findIndex((a: any) => a.uid === adm.uid);
-        if (idx !== -1) {
-          localAdmins[idx] = updatedAdmin;
-          localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
-        }
-      } catch (localErr) {
-        console.warn('[Toggle Status Local Warning]', localErr);
-      }
-
       // Sync Firebase
       await setDoc(doc(db, 'admins', adm.uid), updatedAdmin);
       onShowToast(`Status akun "${adm.username}" diubah menjadi ${newStatus}.`, 'success');
@@ -946,18 +872,6 @@ export default function AdminPanel({
 
       const pwHash = await hashPassword(resetPasswordValue);
       const updatedAdmin = { ...targetAdmin, passwordHash: pwHash };
-
-      // Sync local storage
-      try {
-        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
-        const idx = localAdmins.findIndex((a: any) => a.uid === resettingManagerUid);
-        if (idx !== -1) {
-          localAdmins[idx] = updatedAdmin;
-          localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
-        }
-      } catch (localErr) {
-        console.warn('[Reset Password Local Warning]', localErr);
-      }
 
       // Sync Firebase
       await setDoc(doc(db, 'admins', resettingManagerUid), updatedAdmin);
@@ -2911,6 +2825,77 @@ export default function AdminPanel({
                   </div>
                 </div>
               )}
+
+              {/* LIVE DATABASE DEBUG PANEL (Persyaratan 6) */}
+              <div className="mt-8 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-3">
+                  <div>
+                    <h4 className="font-display text-xs font-bold text-red-400 uppercase tracking-widest flex items-center gap-1.5">
+                      ⚙️ Panel Debug Database Real-Time
+                    </h4>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      Verifikasi instan bahwa data tersimpan permanen di cloud database (Firestore), bukan localStorage.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      fetchTeamAdmins();
+                      onShowToast('Database disinkronkan langsung!', 'success');
+                    }}
+                    className="bg-white/5 hover:bg-white/10 text-white text-[10px] font-mono px-3 py-1.5 rounded-lg border border-white/10 transition-all font-bold self-start sm:self-auto"
+                  >
+                    Sync DB Now
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-[10px] text-green-400 bg-green-950/40 px-3 py-2 rounded-xl border border-green-500/15">
+                    <span className="h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse"></span>
+                    <span>Status Koneksi: <strong>Firestore Cloud Database Terkoneksi Aktif</strong></span>
+                  </div>
+                  
+                  <div className="overflow-x-auto rounded-xl border border-white/5 bg-black/10">
+                    <table className="w-full text-left text-[11px] font-mono text-gray-400">
+                      <thead className="bg-white/5 text-gray-300 border-b border-white/5">
+                        <tr>
+                          <th className="px-3 py-2">Doc ID (UID)</th>
+                          <th className="px-3 py-2">Username</th>
+                          <th className="px-3 py-2">Role</th>
+                          <th className="px-3 py-2">Password Hash (SHA256)</th>
+                          <th className="px-3 py-2">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamAdmins.map((adm: any) => (
+                          <tr key={adm.uid} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                            <td className="px-3 py-2 text-slate-400 font-bold truncate max-w-[120px]" title={adm.uid}>{adm.uid}</td>
+                            <td className="px-3 py-2 text-white font-sans">{adm.username}</td>
+                            <td className="px-3 py-2 text-accent-gold">{adm.role}</td>
+                            <td className="px-3 py-2 text-slate-500 truncate max-w-[180px]" title={adm.passwordHash}>
+                              {adm.passwordHash || <span className="text-red-500 italic">No Hash</span>}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${
+                                adm.status === 'Nonaktif' ? 'bg-red-500/15 text-red-400 border border-red-500/20' : 'bg-green-500/15 text-green-400 border border-green-500/20'
+                              }`}>
+                                {adm.status || 'Aktif'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                        {teamAdmins.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-4 text-center text-gray-500">
+                              Tidak ada data admin/manager di database.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

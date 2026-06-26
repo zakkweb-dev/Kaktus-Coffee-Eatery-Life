@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, getDoc, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged, signOut, User, signInAnonymously } from 'firebase/auth';
 import { db, auth, seedDatabaseIfNeeded, syncStateArrayToFirestore, syncConfig, handleFirestoreError, OperationType } from './lib/firebase';
 import { Produk, Launching, Event, Galeri, Cabang, DatabaseConfig, CustomCake, HeroBanner } from './types';
@@ -142,6 +142,37 @@ export default function App() {
       // If there's an active local session
       if (session) {
         const isBootstrapOwner = session.username === 'Al Rasyak Izwar';
+        
+        // Securely validate Manager session against master Firestore records on startup
+        if (!isBootstrapOwner) {
+          setCheckingAdmin(true);
+          try {
+            console.log(`[Admin Auth Logging] Verifying live status for manager: ${session.username}...`);
+            const snap = await getDocs(collection(db, 'admins'));
+            let matchedDocs: any[] = [];
+            snap.forEach(doc => {
+              const data = doc.data();
+              if (data.username && data.username.toLowerCase().trim() === session.username.toLowerCase().trim()) {
+                matchedDocs.push(data);
+              }
+            });
+            
+            const isDeactivated = matchedDocs.some(d => d.status === 'Nonaktif');
+            const existsInDb = matchedDocs.length > 0;
+            
+            if (!existsInDb || isDeactivated) {
+              console.warn(`[Admin Auth] Manager "${session.username}" is inactive or deleted in database. Terminating session.`);
+              localStorage.removeItem('kaktus_admin_session');
+              setUser(null);
+              setAdminRole(null);
+              setCheckingAdmin(false);
+              return;
+            }
+          } catch (dbErr) {
+            console.warn('[Admin Auth Warning] Unable to reach Firestore to verify manager session (operating offline-safe):', dbErr);
+          }
+        }
+
         if (!firebaseUser) {
           console.log('[Admin Auth Logging] Local session exists but Firebase user is unauthenticated. Initiating silent Firebase authorization...');
           setCheckingAdmin(true);
