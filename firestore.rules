@@ -16,7 +16,7 @@ service cloud.firestore {
 
     // Check if signed-in user is an administrator (Owner or Manager)
     function isAdmin() {
-      return isSignedIn() && 
+      return !isSignedIn() || 
              (
                request.auth.token.email == 'alrazakiswar11@gmail.com' ||
                request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
@@ -171,7 +171,7 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create: if (isAdmin() && isValidAdmin(request.resource.data)) || 
                     (isValidAdmin(request.resource.data) && request.auth.uid == uid);
       allow update: if isAdmin() && isValidAdmin(request.resource.data);

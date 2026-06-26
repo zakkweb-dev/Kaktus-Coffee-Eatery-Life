@@ -129,6 +129,17 @@ export default function AdminPanel({
   const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [showManagerPassword, setShowManagerPassword] = useState(false);
 
+  // States for Resetting Manager Password
+  const [resettingManagerUid, setResettingManagerUid] = useState<string | null>(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+
+  // States for Testing Login
+  const [testingLoginUid, setTestingLoginUid] = useState<string | null>(null);
+  const [testPasswordValue, setTestPasswordValue] = useState('');
+  const [testingLoginLoading, setTestingLoginLoading] = useState(false);
+  const [testLoginResult, setTestLoginResult] = useState<{ success: boolean; message: string } | null>(null);
+
   // Global upload process indicator
   const [uploadProgress, setUploadProgress] = useState(false);
   const [uploadingSection, setUploadingSection] = useState<'product' | 'launching' | 'event' | 'gallery' | 'cake' | 'banner' | 'cabang' | null>(null);
@@ -239,18 +250,105 @@ export default function AdminPanel({
     return username.toLowerCase().trim().replace(/[^a-z0-9]/g, '_') + '@kaktuscoffee.com';
   };
 
-  // SHA256 Password Hash Engine
+  // Pure JS SHA-256 Fallback for non-secure contexts (HTTP / mobile)
+  const pureJsSha256 = (ascii: string): string => {
+    function rightRotate(value: number, amount: number) {
+      return (value >>> amount) | (value << (32 - amount));
+    }
+    
+    const words: number[] = [];
+    const asciiLength = ascii.length;
+    for (let i = 0; i < asciiLength * 8; i += 8) {
+      words[i >> 5] |= (ascii.charCodeAt(i / 8) & 0xff) << (24 - (i % 32));
+    }
+    
+    // Padding
+    words[asciiLength >> 2] |= 0x80 << (24 - ((asciiLength * 8) % 32));
+    words[(((asciiLength + 8) >> 6) << 4) + 15] = asciiLength * 8;
+    
+    const hash = [
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    ];
+    
+    const k = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+    
+    const w = new Array(64);
+    for (let i = 0; i < words.length; i += 16) {
+      let a = hash[0];
+      let b = hash[1];
+      let c = hash[2];
+      let d = hash[3];
+      let e = hash[4];
+      let f = hash[5];
+      let g = hash[6];
+      let h = hash[7];
+      
+      for (let j = 0; j < 64; j++) {
+        if (j < 16) {
+          w[j] = words[i + j] || 0;
+        } else {
+          const s0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+          const s1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+          w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+        }
+        
+        const ch = (e & f) ^ (~e & g);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const sigma0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+        const sigma1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+        const temp1 = (h + sigma1 + ch + k[j] + w[j]) | 0;
+        const temp2 = (sigma0 + maj) | 0;
+        
+        h = g;
+        g = f;
+        f = e;
+        e = (d + temp1) | 0;
+        d = c;
+        c = b;
+        b = a;
+        a = (temp1 + temp2) | 0;
+      }
+      
+      hash[0] = (hash[0] + a) | 0;
+      hash[1] = (hash[1] + b) | 0;
+      hash[2] = (hash[2] + c) | 0;
+      hash[3] = (hash[3] + d) | 0;
+      hash[4] = (hash[4] + e) | 0;
+      hash[5] = (hash[5] + f) | 0;
+      hash[6] = (hash[6] + g) | 0;
+      hash[7] = (hash[7] + h) | 0;
+    }
+    
+    return hash.map(word => {
+      const hex = (word >>> 0).toString(16);
+      return hex.padStart(8, '0');
+    }).join('');
+  };
+
+  // SHA256 Password Hash Engine with full support for non-secure contexts (HTTP / mobile)
   const hashPassword = async (plainText: string) => {
     try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(plainText);
-      const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      if (window.crypto && window.crypto.subtle) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(plainText);
+        const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      }
     } catch (e) {
-      console.error('[Hash Sg]', e);
-      return '';
+      console.warn('[WebCrypto Failed, using fallback]', e);
     }
+    return pureJsSha256(plainText);
   };
 
   // Auth Submit Handlers - Enforces standard Username & Password ONLY
@@ -368,6 +466,11 @@ export default function AdminPanel({
         }
 
         if (foundAdmin) {
+          if (foundAdmin.status === 'Nonaktif') {
+            onShowToast('Akun Anda dinonaktifkan oleh Owner. Silakan hubungi Owner.', 'error');
+            setAuthLoading(false);
+            return;
+          }
           console.log(`[Admin Auth Logging] Successful authenticated match: role='${foundAdmin.role}', username='${foundAdmin.username}'`);
           // Sync active anonymous Firebase auth session UID to Firestore so the current browser is authorized as Admin
           if (auth.currentUser && auth.currentUser.uid !== foundAdmin.uid) {
@@ -681,13 +784,17 @@ export default function AdminPanel({
         }
       }
 
+      const existing = teamAdmins.find((adm: any) => adm.uid === editingManagerUid);
+      const currentStatus = existing?.status || 'Aktif';
+
       const managerUid = editingManagerUid || `manager_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const mgrData = {
         uid: managerUid,
         email: pseudoEmail,
         username: rawUsername,
         role: 'Manager',
-        passwordHash: pwHash
+        passwordHash: pwHash,
+        status: currentStatus
       };
 
       // Sync local storage list
@@ -786,6 +893,120 @@ export default function AdminPanel({
         onShowToast(`Hak admin untuk "${email}" dicabut secara lokal.`, 'success');
         fetchTeamAdmins();
       }
+    }
+  };
+
+  const handleToggleAdminStatus = async (adm: any) => {
+    if (adminRole !== 'Owner') {
+      onShowToast('Hanya Owner yang berhak mengubah status akun.', 'error');
+      return;
+    }
+    const newStatus = adm.status === 'Nonaktif' ? 'Aktif' : 'Nonaktif';
+    const updatedAdmin = { ...adm, status: newStatus };
+
+    try {
+      // Sync local storage
+      try {
+        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
+        const idx = localAdmins.findIndex((a: any) => a.uid === adm.uid);
+        if (idx !== -1) {
+          localAdmins[idx] = updatedAdmin;
+          localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
+        }
+      } catch (localErr) {
+        console.warn('[Toggle Status Local Warning]', localErr);
+      }
+
+      // Sync Firebase
+      await setDoc(doc(db, 'admins', adm.uid), updatedAdmin);
+      onShowToast(`Status akun "${adm.username}" diubah menjadi ${newStatus}.`, 'success');
+      fetchTeamAdmins();
+    } catch (err: any) {
+      console.error('[Toggle Status Failed]', err);
+      onShowToast('Gagal memperbarui status akun ke server.', 'error');
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resettingManagerUid) return;
+    if (!resetPasswordValue.trim()) {
+      onShowToast('Kata sandi baru tidak boleh kosong!', 'error');
+      return;
+    }
+
+    setResetPasswordLoading(true);
+    try {
+      const targetAdmin = teamAdmins.find((a: any) => a.uid === resettingManagerUid);
+      if (!targetAdmin) {
+        onShowToast('Akun tidak ditemukan!', 'error');
+        setResetPasswordLoading(false);
+        return;
+      }
+
+      const pwHash = await hashPassword(resetPasswordValue);
+      const updatedAdmin = { ...targetAdmin, passwordHash: pwHash };
+
+      // Sync local storage
+      try {
+        const localAdmins = JSON.parse(localStorage.getItem('kaktus_admins') || '[]');
+        const idx = localAdmins.findIndex((a: any) => a.uid === resettingManagerUid);
+        if (idx !== -1) {
+          localAdmins[idx] = updatedAdmin;
+          localStorage.setItem('kaktus_admins', JSON.stringify(localAdmins));
+        }
+      } catch (localErr) {
+        console.warn('[Reset Password Local Warning]', localErr);
+      }
+
+      // Sync Firebase
+      await setDoc(doc(db, 'admins', resettingManagerUid), updatedAdmin);
+      onShowToast(`Kata sandi akun "${targetAdmin.username}" berhasil di-reset!`, 'success');
+      setResettingManagerUid(null);
+      setResetPasswordValue('');
+      fetchTeamAdmins();
+    } catch (err: any) {
+      console.error('[Reset Password Failed]', err);
+      onShowToast('Gagal me-reset kata sandi ke server.', 'error');
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+
+  const handleTestLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testingLoginUid) return;
+    if (!testPasswordValue.trim()) {
+      onShowToast('Masukkan sandi tes login!', 'error');
+      return;
+    }
+
+    setTestingLoginLoading(true);
+    setTestLoginResult(null);
+    try {
+      const hashedInput = await hashPassword(testPasswordValue);
+      const targetAdmin = teamAdmins.find((a: any) => a.uid === testingLoginUid);
+      
+      if (!targetAdmin) {
+        setTestLoginResult({ success: false, message: 'Akun tidak ditemukan di database!' });
+        return;
+      }
+
+      if (targetAdmin.status === 'Nonaktif') {
+        setTestLoginResult({ success: false, message: 'Akun berstatus Nonaktif (dinonaktifkan oleh Owner).' });
+        return;
+      }
+
+      if (targetAdmin.passwordHash === hashedInput) {
+        setTestLoginResult({ success: true, message: `Login Berhasil! Akun "${targetAdmin.username}" siap digunakan.` });
+      } else {
+        setTestLoginResult({ success: false, message: 'Password salah / tidak cocok!' });
+      }
+    } catch (err: any) {
+      console.error('[Test Login Error]', err);
+      setTestLoginResult({ success: false, message: 'Gagal melakukan verifikasi tes login.' });
+    } finally {
+      setTestingLoginLoading(false);
     }
   };
 
@@ -2477,55 +2698,219 @@ export default function AdminPanel({
                           <tr>
                             <th className="px-4 py-2">Identitas</th>
                             <th className="px-4 py-2">Peran</th>
+                            <th className="px-4 py-2">Status</th>
                             <th className="px-4 py-2 text-right">Opsi</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-white/5">
-                          {teamAdmins.map((adm, index) => (
-                            <tr key={adm.uid || index} className="hover:bg-white/[0.01]">
-                              <td className="px-4 py-3 text-white">
-                                <div className="space-y-0.5">
-                                  <span className="font-bold block truncate max-w-[150px]">{adm.username || 'Admin Kaktus'}</span>
-                                  <span className="text-[10px] text-gray-500 font-mono">{adm.email}</span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className="bg-accent-gold/20 text-accent-gold text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold">
-                                  {adm.role}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
-                                  <div className="flex items-center justify-end gap-2">
-                                    <button
-                                      onClick={() => {
-                                        setEditingManagerUid(adm.uid);
-                                        setNewManagerUsername(adm.username || '');
-                                        setNewManagerPassword('');
-                                      }}
-                                      className="bg-accent-gold/10 hover:bg-accent-gold text-accent-gold hover:text-elegant-green-950 text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
-                                      className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all"
-                                    >
-                                      Cabut Akses
-                                    </button>
+                          {teamAdmins.map((adm, index) => {
+                            const isStatusAktif = adm.status !== 'Nonaktif';
+                            return (
+                              <tr key={adm.uid || index} className="hover:bg-white/[0.01]">
+                                <td className="px-4 py-3 text-white">
+                                  <div className="space-y-0.5">
+                                    <span className="font-bold block truncate max-w-[150px]">{adm.username || 'Admin Kaktus'}</span>
+                                    <span className="text-[10px] text-gray-500 font-mono">{adm.email}</span>
                                   </div>
-                                ) : (
-                                  <span className="text-[10px] text-gray-500 italic">Sistem Utama</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className="bg-accent-gold/20 text-accent-gold text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold">
+                                    {adm.role}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleAdminStatus(adm)}
+                                      title="Klik untuk mengubah status"
+                                      className={`text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold transition-all flex items-center gap-1.5 ${
+                                        isStatusAktif
+                                          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                          : 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                      }`}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${isStatusAktif ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
+                                      {isStatusAktif ? 'Aktif' : 'Nonaktif'}
+                                    </button>
+                                  ) : (
+                                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] font-mono px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1.5 w-max">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                                      Aktif
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  {adm.email !== 'alrazakiswar11@gmail.com' && adm.email !== 'al_rasyak_izwar@kaktuscoffee.com' ? (
+                                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingManagerUid(adm.uid);
+                                          setNewManagerUsername(adm.username || '');
+                                          setNewManagerPassword('');
+                                        }}
+                                        className="bg-accent-gold/10 hover:bg-accent-gold text-accent-gold hover:text-elegant-green-950 text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setResettingManagerUid(adm.uid);
+                                          setResetPasswordValue('');
+                                        }}
+                                        className="bg-purple-500/10 hover:bg-purple-500 text-purple-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
+                                        title="Reset Sandi"
+                                      >
+                                        Sandi
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setTestingLoginUid(adm.uid);
+                                          setTestPasswordValue('');
+                                          setTestLoginResult(null);
+                                        }}
+                                        className="bg-blue-500/10 hover:bg-blue-500 text-blue-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
+                                        title="Uji coba login akun manager"
+                                      >
+                                        Tes
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteAdmin(adm.uid, adm.email)}
+                                        className="bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white text-[10px] px-2.5 py-1 rounded-lg transition-all font-bold"
+                                      >
+                                        Hapus
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-gray-500 italic">Sistem Utama</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   )}
                 </div>
               </div>
+
+              {/* Reset Password Modal Overlay */}
+              {resettingManagerUid && (
+                <div className="fixed inset-0 z-50 bg-elegant-green-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-[#122b1e] border border-white/10 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
+                    <h3 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest flex items-center gap-1.5 border-b border-white/5 pb-2">
+                      🔑 Reset Password Manager
+                    </h3>
+                    <form onSubmit={handleResetPassword} className="space-y-4">
+                      <div className="space-y-1 text-left">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="new-reset-pass">Sandi Baru</label>
+                        <input
+                          id="new-reset-pass"
+                          type="text"
+                          required
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                          value={resetPasswordValue}
+                          onChange={(e) => setResetPasswordValue(e.target.value)}
+                          placeholder="Masukkan password baru..."
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setResettingManagerUid(null);
+                            setResetPasswordValue('');
+                          }}
+                          className="flex-1 bg-white/5 hover:bg-white/10 text-white font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors"
+                        >
+                          Batal
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={resetPasswordLoading}
+                          className="flex-1 bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1"
+                        >
+                          {resetPasswordLoading ? <Loader2 className="animate-spin" size={12} /> : 'Simpan'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
+
+              {/* Test Login Modal Overlay */}
+              {testingLoginUid && (
+                <div className="fixed inset-0 z-50 bg-elegant-green-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-[#122b1e] border border-white/10 p-6 rounded-2xl w-full max-w-sm space-y-4 shadow-2xl">
+                    <h3 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest flex items-center gap-1.5 border-b border-white/5 pb-2">
+                      ⚡ Tes Login Akun Manager
+                    </h3>
+                    <p className="text-[10px] text-slate-400">Verifikasi apakah username dan kata sandi cocok dan akun dapat login langsung.</p>
+                    
+                    <form onSubmit={handleTestLogin} className="space-y-4">
+                      <div className="space-y-1 text-left">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block">Username</label>
+                        <input
+                          type="text"
+                          disabled
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white/50 cursor-not-allowed"
+                          value={teamAdmins.find(a => a.uid === testingLoginUid)?.username || ''}
+                        />
+                      </div>
+
+                      <div className="space-y-1 text-left">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="test-pass">Sandi Tes Login</label>
+                        <input
+                          id="test-pass"
+                          type="text"
+                          required
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                          value={testPasswordValue}
+                          onChange={(e) => setTestPasswordValue(e.target.value)}
+                          placeholder="Ketik sandi tes..."
+                        />
+                      </div>
+
+                      {testLoginResult && (
+                        <div className={`p-3 rounded-xl border text-[10px] leading-normal text-left ${
+                          testLoginResult.success 
+                            ? 'bg-green-500/10 border-green-500/20 text-green-400' 
+                            : 'bg-red-500/10 border-red-500/20 text-red-400'
+                        }`}>
+                          {testLoginResult.success ? '✅ ' : '❌ '}
+                          {testLoginResult.message}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTestingLoginUid(null);
+                            setTestPasswordValue('');
+                            setTestLoginResult(null);
+                          }}
+                          className="flex-1 bg-white/5 hover:bg-white/10 text-white font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors"
+                        >
+                          Tutup
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={testingLoginLoading}
+                          className="flex-1 bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-[9px] uppercase font-bold tracking-wider py-2.5 rounded-lg transition-colors flex items-center justify-center gap-1"
+                        >
+                          {testingLoginLoading ? <Loader2 className="animate-spin" size={12} /> : 'Uji Login'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
