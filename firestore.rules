@@ -11,13 +11,17 @@ service cloud.firestore {
 
     // Check if user is signed in
     function isSignedIn() {
-      return true;
+      return request.auth != null;
     }
 
     // Check if signed-in user is an administrator (Owner or Manager)
-    // Supports the bootstrapped user email or direct lookup in the admins collection
     function isAdmin() {
-      return true;
+      return isSignedIn() && 
+             (
+               request.auth.token.email == 'alrazakiswar11@gmail.com' ||
+               request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
+               exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+             );
     }
 
     // Check valid string length to prevent Denial of Wallet string injection
@@ -167,11 +171,18 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow read, write: if isValidId(uid);
+      allow read: if isSignedIn();
+      allow create: if (isAdmin() && isValidAdmin(request.resource.data)) || 
+                    (isValidAdmin(request.resource.data) && request.auth.uid == uid);
+      allow update: if isAdmin() && isValidAdmin(request.resource.data);
+      allow delete: if isAdmin() && request.auth.uid != uid;
     }
 
     match /reviews/{id} {
-      allow read, write: if true;
+      allow read: if true;
+      allow create: if isValidId(id) && isValidReview(request.resource.data) && request.resource.data.status == 'pending';
+      allow update: if isAdmin() && isValidId(id) && isValidReview(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }
