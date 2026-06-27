@@ -34,7 +34,11 @@ export default function App() {
   const [gallery, setGallery] = useState<Galeri[]>([]);
   const [branches, setBranches] = useState<Cabang[]>([]);
   const [customCakes, setCustomCakes] = useState<CustomCake[]>([]);
-  const [config, setConfig] = useState<DatabaseConfig>({ linkGrabFood: 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8' });
+  const [config, setConfig] = useState<DatabaseConfig>({ 
+    linkGrabFood: 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8',
+    noWaCake: '6285738662165',
+    logoUrl: ''
+  });
   const [banners, setBanners] = useState<HeroBanner[]>([]);
   
   // Security session states
@@ -313,6 +317,19 @@ export default function App() {
       }
     }
   }, [user, adminRole]);
+
+  // Update Favicon when config logoUrl changes
+  useEffect(() => {
+    if (config?.logoUrl) {
+      let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'icon';
+        document.getElementsByTagName('head')[0].appendChild(link);
+      }
+      link.href = config.logoUrl;
+    }
+  }, [config?.logoUrl]);
 
   // 3. Bind Live Firestore Listeners
   useEffect(() => {
@@ -598,6 +615,7 @@ export default function App() {
         }}
         activeSection={activeSection}
         setActiveSection={setActiveSection}
+        logoUrl={config.logoUrl}
       />
 
       {/* Conditionally reveal ADMIN PANEL or PUBLIC WEBSITE */}
@@ -652,6 +670,7 @@ export default function App() {
               window.location.hash = 'admin';
               window.scrollTo(0, 0);
             }}
+            logoUrl={config.logoUrl}
           />
 
           {/* Floating UI overlay widgets */}

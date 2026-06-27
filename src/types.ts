@@ -66,6 +66,7 @@ export interface AdminCredentials {
 export interface DatabaseConfig {
   linkGrabFood: string; // URL for GrabFood
   noWaCake: string; // WhatsApp number for Custom Cake orders
+  logoUrl?: string; // Custom Logo URL
 }
 
 export interface Review {

@@ -94,7 +94,9 @@
       "description": "Pengaturan database dan link GrabFood",
       "type": "object",
       "properties": {
-        "linkGrabFood": { "type": "string" }
+        "linkGrabFood": { "type": "string" },
+        "noWaCake": { "type": "string" },
+        "logoUrl": { "type": "string" }
       },
       "required": ["linkGrabFood"]
     },

@@ -269,7 +269,8 @@ export const INITIAL_DATABASE: FullDatabase = {
   admins: [],
   config: {
     linkGrabFood: 'https://food.grab.com/id/id/restaurant/kaktus-coffee-eatery-galesong-delivery/6-CY3EFH3KLJK3J8',
-    noWaCake: '6285738662165'
+    noWaCake: '6285738662165',
+    logoUrl: ''
   },
   banners: []
 };

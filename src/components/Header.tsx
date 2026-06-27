@@ -7,6 +7,7 @@ interface HeaderProps {
   onExitAdmin: () => void;
   activeSection: string;
   setActiveSection: (section: string) => void;
+  logoUrl?: string;
 }
 
 export default function Header({
@@ -14,7 +15,8 @@ export default function Header({
   isAdminMode,
   onExitAdmin,
   activeSection,
-  setActiveSection
+  setActiveSection,
+  logoUrl
 }: HeaderProps) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -76,19 +78,40 @@ export default function Header({
               handleScrollTo('hero');
             }
           }}
-          className="flex items-center gap-2 group text-left cursor-pointer"
+          className="flex items-center gap-2.5 group text-left cursor-pointer"
         >
-          <div className="w-10 h-10 rounded-full border border-accent-gold/25 bg-elegant-green-900/60 flex items-center justify-center text-accent-gold transition-transform duration-500 group-hover:rotate-12">
-            <Coffee size={20} />
-          </div>
-          <div>
-            <span className="block font-display text-base font-extrabold tracking-wider text-white uppercase sm:text-lg">
-              Kaktus <span className="text-accent-gold font-light">Coffee</span>
-            </span>
-            <span className="block text-[9px] -mt-1 tracking-widest text-[#a6bca2] uppercase font-mono">
-              Eatery & Life
-            </span>
-          </div>
+          {logoUrl ? (
+            <div className="flex items-center gap-2.5">
+              <img 
+                src={logoUrl} 
+                alt="Logo Kaktus" 
+                className="h-10 w-auto max-w-[120px] object-contain transition-transform duration-500 group-hover:scale-105 rounded-md"
+                referrerPolicy="no-referrer"
+              />
+              <div className="hidden sm:block">
+                <span className="block font-display text-base font-extrabold tracking-wider text-white uppercase">
+                  Kaktus <span className="text-accent-gold font-light">Coffee</span>
+                </span>
+                <span className="block text-[9px] -mt-1 tracking-widest text-[#a6bca2] uppercase font-mono">
+                  Eatery & Life
+                </span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="w-10 h-10 rounded-full border border-accent-gold/25 bg-elegant-green-900/60 flex items-center justify-center text-accent-gold transition-transform duration-500 group-hover:rotate-12">
+                <Coffee size={20} />
+              </div>
+              <div>
+                <span className="block font-display text-base font-extrabold tracking-wider text-white uppercase sm:text-lg">
+                  Kaktus <span className="text-accent-gold font-light">Coffee</span>
+                </span>
+                <span className="block text-[9px] -mt-1 tracking-widest text-[#a6bca2] uppercase font-mono">
+                  Eatery & Life
+                </span>
+              </div>
+            </>
+          )}
         </button>
 
         {/* Desktop Nav */}

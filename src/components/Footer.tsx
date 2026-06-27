@@ -3,9 +3,10 @@ import { Instagram, MapPin, Phone, Music2, Share2, Compass, ShieldCheck } from '
 interface FooterProps {
   onScrollTo: (id: string) => void;
   onNavigateToAdmin: () => void;
+  logoUrl?: string;
 }
 
-export default function Footer({ onScrollTo, onNavigateToAdmin }: FooterProps) {
+export default function Footer({ onScrollTo, onNavigateToAdmin, logoUrl }: FooterProps) {
   const currentYear = new Date().getFullYear();
 
   return (
@@ -14,7 +15,15 @@ export default function Footer({ onScrollTo, onNavigateToAdmin }: FooterProps) {
         
         {/* Branch / Brand Column */}
         <div className="md:col-span-5 space-y-4">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
+            {logoUrl ? (
+              <img 
+                src={logoUrl} 
+                alt="Logo Kaktus" 
+                className="h-10 w-auto max-w-[120px] object-contain rounded-md"
+                referrerPolicy="no-referrer"
+              />
+            ) : null}
             <span className="font-display text-lg font-black tracking-wider text-white uppercase sm:text-xl">
               Kaktus <span className="text-accent-gold font-light">Coffee</span>
             </span>

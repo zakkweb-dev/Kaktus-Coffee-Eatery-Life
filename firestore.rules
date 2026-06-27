@@ -18,8 +18,8 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && 
              (
-               request.auth.token.get('email', '') == 'alrazakiswar11@gmail.com' ||
-               request.auth.token.get('email', '') == 'al_rasyak_izwar@kaktuscoffee.com' ||
+               request.auth.token.email == 'alrazakiswar11@gmail.com' ||
+               request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
                exists(/databases/$(database)/documents/admins/$(request.auth.uid))
              );
     }
@@ -28,8 +28,8 @@ service cloud.firestore {
     function isOwner() {
       return isSignedIn() && 
              (
-               request.auth.token.get('email', '') == 'alrazakiswar11@gmail.com' ||
-               request.auth.token.get('email', '') == 'al_rasyak_izwar@kaktuscoffee.com' ||
+               request.auth.token.email == 'alrazakiswar11@gmail.com' ||
+               request.auth.token.email == 'al_rasyak_izwar@kaktuscoffee.com' ||
                (
                  exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
                  get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'Owner'
@@ -114,7 +114,8 @@ service cloud.firestore {
 
     function isValidConfig(item) {
       return item.linkGrabFood is string && item.linkGrabFood.size() <= 500 &&
-             item.get('noWaCake', '') is string && item.get('noWaCake', '').size() <= 64;
+             item.get('noWaCake', '') is string && item.get('noWaCake', '').size() <= 64 &&
+             item.get('logoUrl', '') is string && item.get('logoUrl', '').size() <= 1000;
     }
 
     function isValidAdmin(item) {
@@ -182,7 +183,7 @@ service cloud.firestore {
 
     match /config/{id} {
       allow read: if true; // Publicly readable for operational links like GrabFood
-      allow write: if isAdmin() && isValidId(id);
+      allow write: if isAdmin() && isValidId(id) && isValidConfig(request.resource.data);
     }
 
     match /admins/{uid} {

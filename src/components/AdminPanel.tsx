@@ -22,7 +22,7 @@ import {
 } from 'firebase/firestore';
 import { 
   ShieldCheck, LogOut, LayoutGrid, Package, Calendar, Image as ImageIcon, 
-  Settings, Plus, Edit, Trash2, Database, Sliders, Cake, RefreshCw, Key,
+  Settings, Plus, Edit, Trash2, Database, Sliders, Cake, RefreshCw, Key, Coffee,
   UserPlus, ShieldAlert, Loader2, Upload, MessageSquare, ExternalLink, Users, Star, Check, Trash, Clock, CheckCircle2,
   Eye, EyeOff, Copy
 } from 'lucide-react';
@@ -190,6 +190,16 @@ export default function AdminPanel({
   const [bannerForm, setBannerForm] = useState<Partial<HeroBanner>>({
     fotoUrl: '', title: 'KAKTUS COFFEE', subtitle: 'Eatery & Life', isActive: true, order: 1
   });
+
+  const [tempLogoUrl, setTempLogoUrl] = useState<string>('');
+
+  React.useEffect(() => {
+    if (config?.logoUrl) {
+      setTempLogoUrl(config.logoUrl);
+    } else {
+      setTempLogoUrl('');
+    }
+  }, [config?.logoUrl]);
 
   // Cabang edit/creation states
   const [editCabangId, setEditCabangId] = useState<string | null>(null);
@@ -1048,9 +1058,18 @@ export default function AdminPanel({
           <div className="absolute top-0 left-0 w-full h-[3px] bg-accent-gold" />
           
           <div className="text-center space-y-2">
-            <div className="w-12 h-12 rounded-full border border-accent-gold/30 bg-accent-gold/10 flex items-center justify-center text-accent-gold mx-auto">
-              <ShieldCheck size={24} />
-            </div>
+            {config?.logoUrl ? (
+              <img 
+                src={config.logoUrl} 
+                alt="Logo Kaktus" 
+                className="h-16 w-auto mx-auto object-contain rounded-xl mb-3"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-full border border-accent-gold/30 bg-accent-gold/10 flex items-center justify-center text-accent-gold mx-auto">
+                <ShieldCheck size={24} />
+              </div>
+            )}
             <h2 className="font-display text-xl font-black text-white uppercase tracking-wider">
               Login Kaktus Admin
             </h2>
@@ -1129,6 +1148,16 @@ export default function AdminPanel({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* LEFT COLUMN: User Profile & Tab Navigation Rail */}
         <div className="lg:col-span-3 space-y-6">
+          {config?.logoUrl && (
+            <div className="glass-panel p-4 rounded-2xl border border-white/5 flex justify-center items-center bg-white/[0.02]">
+              <img 
+                src={config.logoUrl} 
+                alt="Logo Website" 
+                className="h-12 w-auto object-contain max-h-12"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+          )}
           <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full border border-accent-gold bg-accent-gold/10 flex items-center justify-center text-accent-gold font-bold uppercase text-sm">
@@ -1221,8 +1250,8 @@ export default function AdminPanel({
                 activeTab === 'hero_banner' ? 'bg-accent-gold text-elegant-green-950 font-extrabold' : 'text-gray-400 hover:bg-white/5 hover:text-white'
               }`}
             >
-              <Sliders size={14} />
-              Hero Banner
+              <ImageIcon size={14} />
+              Hero & Branding
             </button>
 
              <button
@@ -2131,108 +2160,404 @@ export default function AdminPanel({
             </div>
           )}
 
-          {/* TAB 7: HERO BANNER MANAGEMENT */}
+          {/* TAB 7: HERO & BRANDING MANAGEMENT */}
           {activeTab === 'hero_banner' && (
-            <div className="space-y-8 animate-fade-in">
+            <div className="space-y-8 animate-fade-in text-left">
               <div className="border-b border-white/5 pb-4">
                 <h3 className="font-display text-base sm:text-lg font-black uppercase text-white tracking-wider">
-                  Kelola Carousels Hero Banner Utama
+                  Menu Hero & Branding Cafe Kaktus
                 </h3>
-                <p className="text-xs text-slate-400">Atur slider promo visual utama di layar paling atas beranda.</p>
+                <p className="text-xs text-slate-400">Atur logo website, identitas visual, serta slider promo hero banner utama secara terpadu.</p>
               </div>
 
-              {/* Slider CRUD form */}
-              <form onSubmit={handleSaveBanner} className="glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
-                <h4 className="font-display text-xs font-extrabold uppercase text-accent-gold tracking-widest border-b border-white/5 pb-2">
-                  {editBannerId ? '📝 Edit URL Latar Belakang Hero' : '➕ Tambah URL Latar Belakang Hero Baru'}
-                </h4>
+              {/* Grid 1: Logo & Branding Configuration */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                
+                {/* Logo Setup Card */}
+                <div className="xl:col-span-7 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5 flex items-center gap-2">
+                    ✨ Identitas Visual & Logo Website
+                  </h4>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="logo-url-input">URL Gambar Logo Resmi Website (.png, .webp, .jpg)</label>
+                      <div className="flex gap-2">
+                        <input
+                          id="logo-url-input"
+                          type="text"
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono focus:outline-none focus:border-accent-gold/45"
+                          value={tempLogoUrl}
+                          onChange={(e) => setTempLogoUrl(e.target.value)}
+                          placeholder="Tempelkan URL gambar logo resmi..."
+                        />
+                        {tempLogoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setTempLogoUrl('')}
+                            className="bg-red-500/10 hover:bg-red-500 hover:text-white text-red-300 px-3 rounded-xl text-xs transition-colors"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
 
-                <div className="space-y-2">
-                  <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="ban-img-text">URL Foto Latar Belakang Hero (.webp, .png, .jpg)</label>
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
-                    <div className="flex-1 flex gap-2">
-                      <input
-                        id="ban-img-text"
-                        type="text"
-                        required
-                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
-                        value={bannerForm.fotoUrl || ''}
-                        placeholder="Masukkan URL Gambar Latar Belakang Hero..."
-                        onChange={(e) => setBannerForm({ ...bannerForm, fotoUrl: e.target.value })}
-                      />
-                      {bannerForm.fotoUrl && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                      <div className="p-4 rounded-xl border border-white/5 bg-white/[0.01] space-y-2">
+                        <span className="text-[10px] text-gray-400 font-mono uppercase font-bold block">Preview Logo Baru</span>
+                        <div className="h-20 flex items-center justify-center border border-dashed border-white/10 rounded-lg p-2 bg-black/30">
+                          {tempLogoUrl ? (
+                            <img 
+                              src={tempLogoUrl} 
+                              alt="Pratinjau Logo" 
+                              className="max-h-16 max-w-full object-contain"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=80&auto=format&fit=crop&q=60';
+                              }}
+                            />
+                          ) : (
+                            <span className="text-[10px] text-gray-500 italic">Belum ada URL logo</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-4 rounded-xl border border-white/5 bg-white/[0.01] space-y-2">
+                        <span className="text-[10px] text-gray-400 font-mono uppercase font-bold block">Logo Aktif Saat Ini</span>
+                        <div className="h-20 flex items-center justify-center border border-white/10 rounded-lg p-2 bg-black/10">
+                          {config?.logoUrl ? (
+                            <img 
+                              src={config.logoUrl} 
+                              alt="Logo Aktif" 
+                              className="max-h-16 max-w-full object-contain opacity-75"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-[10px] text-gray-500 italic">Default Kaktus Icon</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <p className="text-[10px] text-gray-400 leading-relaxed">
+                      💡 Perubahan logo akan langsung diperbarui secara real-time di seluruh perangkat pada: 
+                      Navbar utama, halaman login, sidebar dashboard admin, footer, dan favicon browser.
+                    </p>
+
+                    <div className="flex justify-end pt-2 border-t border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onUpdateConfig({ ...config, logoUrl: tempLogoUrl });
+                          onShowToast('Logo branding berhasil diperbarui secara real-time!', 'success');
+                        }}
+                        className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-md shadow-accent-gold/10"
+                      >
+                        <Check size={14} />
+                        Simpan Perubahan Logo
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Branding Info / Location list */}
+                <div className="xl:col-span-5 glass-panel p-6 rounded-2xl border border-white/5 flex flex-col justify-between">
+                  <div className="space-y-4">
+                    <h4 className="font-display text-xs font-bold text-white uppercase tracking-widest pb-2 border-b border-white/5">
+                      📌 Titik Sinkronisasi Branding
+                    </h4>
+                    <ul className="space-y-2.5 text-xs text-slate-300">
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold shrink-0"></span>
+                        <span><strong>Header & Navbar:</strong> Logo visual utama di bagian kiri menu atas</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold shrink-0"></span>
+                        <span><strong>Halaman Login Admin:</strong> Logo resmi di atas form login CMS</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold shrink-0"></span>
+                        <span><strong>Admin Dashboard:</strong> Logo penanda di bagian atas panel kendali</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold shrink-0"></span>
+                        <span><strong>Footer Website:</strong> Branding resmi di bagian bawah beranda</span>
+                      </li>
+                      <li className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent-gold shrink-0"></span>
+                        <span><strong>Favicon Browser:</strong> Icon di tab browser pengguna</span>
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="mt-6 p-3 rounded-xl bg-accent-gold/5 border border-accent-gold/15 text-[10px] text-accent-gold/90 leading-relaxed">
+                    🌟 <strong>Pro Tips:</strong> Gunakan gambar logo dengan format transparan (PNG atau WEBP) dengan rasio landscape atau square seimbang untuk hasil estetika terbaik.
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid 2: Carousel Slider Hero Management */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+                
+                {/* Hero Form Card */}
+                <div className="xl:col-span-7 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-2 border-b border-white/5">
+                    {editBannerId ? '📝 Edit Carousels Slider Hero' : '➕ Tambah Carousels Slider Hero Baru'}
+                  </h4>
+
+                  <form onSubmit={handleSaveBanner} className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="hero-url-input-field">URL Foto Latar Belakang Hero</label>
+                      <div className="flex gap-2">
+                        <input
+                          id="hero-url-input-field"
+                          type="text"
+                          required
+                          className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white font-mono"
+                          value={bannerForm.fotoUrl || ''}
+                          placeholder="Masukkan URL foto latar belakang hero..."
+                          onChange={(e) => setBannerForm({ ...bannerForm, fotoUrl: e.target.value })}
+                        />
+                        {bannerForm.fotoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setBannerForm({ ...bannerForm, fotoUrl: '' })}
+                            className="bg-red-500/10 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs transition-colors shrink-0"
+                          >
+                            Hapus
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="hero-title-input">Judul Banner (Slogan)</label>
+                        <input
+                          id="hero-title-input"
+                          type="text"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                          value={bannerForm.title || ''}
+                          placeholder="Contoh: KAKTUS COFFEE"
+                          onChange={(e) => setBannerForm({ ...bannerForm, title: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="hero-sub-input">Subjudul Banner</label>
+                        <input
+                          id="hero-sub-input"
+                          type="text"
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white"
+                          value={bannerForm.subtitle || ''}
+                          placeholder="Contoh: Eatery & Life"
+                          onChange={(e) => setBannerForm({ ...bannerForm, subtitle: e.target.value })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block" htmlFor="hero-order-input">Urutan Tampil (No. Urut)</label>
+                        <input
+                          id="hero-order-input"
+                          type="number"
+                          required
+                          className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-xs text-white font-mono"
+                          value={bannerForm.order || 1}
+                          onChange={(e) => setBannerForm({ ...bannerForm, order: parseInt(e.target.value) || 1 })}
+                        />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <label className="text-[10px] text-gray-400 font-mono uppercase font-bold tracking-wide block">Pratinjau Gambar Banner</label>
+                        <div className="h-10 rounded-lg overflow-hidden border border-white/10 bg-black/40 relative">
+                          {bannerForm.fotoUrl ? (
+                            <img src={bannerForm.fotoUrl} alt="Pratinjau" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-[9px] text-gray-500 italic flex items-center justify-center h-full">Pratinjau kosong</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
+                      {editBannerId && (
                         <button
                           type="button"
-                          onClick={() => setBannerForm({ ...bannerForm, fotoUrl: '' })}
-                          className="bg-red-500/20 hover:bg-red-500 hover:text-white text-red-300 px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shrink-0"
-                          title="Hapus URL Gambar"
+                          onClick={() => {
+                            setEditBannerId(null);
+                            setBannerForm({ fotoUrl: '', title: 'KAKTUS COFFEE', subtitle: 'Eatery & Life', isActive: true, order: 1 });
+                          }}
+                          className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
                         >
-                          Hapus URL
+                          Batal
                         </button>
                       )}
+                      <button
+                        type="submit"
+                        className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
+                      >
+                        {editBannerId ? 'Simpan Perubahan' : 'Terbitkan Slider'}
+                      </button>
                     </div>
-                    {bannerForm.fotoUrl && (
-                      <div className="w-24 h-16 rounded-lg overflow-hidden border border-white/10 shrink-0 relative bg-black/40">
-                        <ImageWithFallback src={bannerForm.fotoUrl} alt="Preview Banner" className="w-full h-full object-cover" />
+                  </form>
+                </div>
+
+                {/* Hero List Card */}
+                <div className="xl:col-span-5 glass-panel p-6 rounded-2xl border border-white/5 space-y-4">
+                  <h4 className="font-display text-xs font-bold text-white uppercase tracking-widest pb-2 border-b border-white/5">
+                    🗂️ Daftar Slider Aktif ({banners.length})
+                  </h4>
+                  
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                    {banners.length === 0 ? (
+                      <div className="text-center py-10 text-xs text-slate-500">
+                        Tidak ada slider aktif. Silakan tambahkan slider baru.
                       </div>
+                    ) : (
+                      banners.map(ban => (
+                        <div key={ban.id} className="flex gap-3 p-2.5 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-white/[0.04] transition-all group">
+                          <div className="w-20 aspect-[16/9] rounded-lg overflow-hidden border border-white/5 shrink-0 bg-black/20">
+                            <img src={ban.fotoUrl} alt={ban.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                          
+                          <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[8px] bg-accent-gold/20 text-accent-gold font-mono font-bold px-1.5 py-0.5 rounded">SLIDE #{ban.order}</span>
+                                <h5 className="text-white text-xs font-extrabold truncate uppercase">{ban.title || 'Kaktus Coffee'}</h5>
+                              </div>
+                              <p className="text-[10px] text-gray-400 truncate mt-0.5">{ban.subtitle || 'Eatery & Life'}</p>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditBannerId(ban.id);
+                                  setBannerForm(ban);
+                                }}
+                                className="text-[10px] text-accent-gold hover:underline font-bold flex items-center gap-1"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleBannerDelete(ban.id)}
+                                className="text-[10px] text-red-400 hover:underline font-bold"
+                              >
+                                Hapus
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
+              </div>
 
-                <div className="flex justify-end gap-2 pt-2 border-t border-white/5">
-                  {editBannerId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditBannerId(null);
-                        setBannerForm({ fotoUrl: '', title: '', subtitle: '', isActive: true, order: 1 });
-                      }}
-                      className="border border-white/10 hover:bg-white/5 text-gray-300 font-display text-xs uppercase font-extrabold px-5 py-2.5 rounded-xl cursor-pointer"
-                    >
-                      Batal
-                    </button>
-                  )}
-                  <button
-                    type="submit"
-                    className="bg-accent-gold hover:bg-white text-elegant-green-950 font-display text-xs uppercase font-extrabold px-6 py-2.5 rounded-xl cursor-pointer"
-                  >
-                    Simpan Banner
-                  </button>
+              {/* Panel 3: Live Preview Branding Mockup (Sebelum & Sesudah) */}
+              <div className="glass-panel p-6 rounded-2xl border border-white/5 space-y-6">
+                <div>
+                  <h4 className="font-display text-xs font-bold text-accent-gold uppercase tracking-widest pb-1.5 border-b border-white/5 flex items-center gap-2">
+                    🖥️ Panel Preview Branding Terintegrasi (Sebelum vs Sesudah)
+                  </h4>
+                  <p className="text-[10px] text-slate-400">Pratinjau visual interaktif tata letak header navigasi dan tampilan latar belakang di beranda utama.</p>
                 </div>
-              </form>
 
-              {/* Slider lists display */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {banners.map(ban => (
-                  <div key={ban.id} className="relative aspect-[16/9] rounded-2xl overflow-hidden group border border-white/5">
-                    <img src={ban.fotoUrl} alt={ban.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    <div className="absolute inset-0 bg-elegant-green-950/80 p-4 flex flex-col justify-between text-left opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div>
-                        <span className="text-[8px] bg-accent-gold text-elegant-green-950 font-mono font-bold px-2 py-0.5 rounded">SLIDER #{ban.order}</span>
-                        <h4 className="text-white font-extrabold text-sm uppercase mt-1.5">{ban.title || 'TANPA JUDUL'}</h4>
-                        <p className="text-[10px] text-gray-400 font-sans line-clamp-1">{ban.subtitle || 'Tanpa subjudul'}</p>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  
+                  {/* Mockup Sebelum */}
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold text-gray-400 font-mono uppercase tracking-wider block">Tampilan Saat Ini (Aktif di Platform)</span>
+                    <div className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-white/5 shadow-2xl bg-elegant-green-950">
+                      {/* Simulated Hero Image */}
+                      {banners.length > 0 ? (
+                        <img src={banners[0].fotoUrl} alt="Background Sebelum" className="absolute inset-0 w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="absolute inset-0 bg-elegant-green-950/90" />
+                      )}
                       
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setEditBannerId(ban.id);
-                            setBannerForm(ban);
-                          }}
-                          className="bg-white/10 hover:bg-accent-gold hover:text-elegant-green-950 text-white p-1.5 rounded transition-colors"
-                        >
-                          <Edit size={12} />
-                        </button>
-                        <button
-                          onClick={() => handleBannerDelete(ban.id)}
-                          className="bg-white/10 hover:bg-red-500 hover:text-white text-white p-1.5 rounded transition-colors"
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                      {/* Gradient overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-elegant-green-950 to-transparent" />
+                      
+                      {/* Simulated Header */}
+                      <div className="absolute top-0 left-0 w-full p-3 bg-elegant-green-950/80 backdrop-blur-sm border-b border-white/5 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 scale-90 origin-left">
+                          {config?.logoUrl ? (
+                            <img src={config.logoUrl} alt="Logo" className="h-6 w-auto object-contain rounded" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-accent-gold/20 flex items-center justify-center text-accent-gold"><Coffee size={12} /></div>
+                          )}
+                          <span className="text-[10px] font-bold text-white uppercase tracking-wider">Kaktus Coffee</span>
+                        </div>
+                        <div className="flex gap-2 text-[8px] text-gray-400 font-mono uppercase">
+                          <span>Beranda</span>
+                          <span>Menu</span>
+                          <span>Cabang</span>
+                        </div>
+                      </div>
+
+                      {/* Simulated Hero Slogan */}
+                      <div className="absolute bottom-4 left-4 text-left space-y-0.5">
+                        <h4 className="text-white text-sm font-black tracking-wider uppercase">
+                          {banners[0]?.title || 'KAKTUS COFFEE'}
+                        </h4>
+                        <p className="text-[10px] text-accent-gold font-mono font-light leading-none">
+                          {banners[0]?.subtitle || 'Eatery & Life'}
+                        </p>
                       </div>
                     </div>
                   </div>
-                ))}
+
+                  {/* Mockup Sesudah */}
+                  <div className="space-y-2">
+                    <span className="text-xs font-bold text-accent-gold font-mono uppercase tracking-wider block">Tampilan Baru (Pratinjau Modifikasi)</span>
+                    <div className="relative aspect-[16/9] rounded-2xl overflow-hidden border border-accent-gold/25 shadow-2xl shadow-accent-gold/5 bg-elegant-green-950">
+                      {/* Simulated Hero Image */}
+                      {bannerForm.fotoUrl ? (
+                        <img src={bannerForm.fotoUrl} alt="Background Sesudah" className="absolute inset-0 w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
+                      ) : banners.length > 0 ? (
+                        <img src={banners[0].fotoUrl} alt="Background Sesudah Fallback" className="absolute inset-0 w-full h-full object-cover opacity-50" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="absolute inset-0 bg-elegant-green-950/90" />
+                      )}
+                      
+                      {/* Gradient overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-elegant-green-950 to-transparent" />
+                      
+                      {/* Simulated Header */}
+                      <div className="absolute top-0 left-0 w-full p-3 bg-elegant-green-950/80 backdrop-blur-sm border-b border-accent-gold/15 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 scale-90 origin-left">
+                          {tempLogoUrl ? (
+                            <img src={tempLogoUrl} alt="Logo" className="h-6 w-auto object-contain rounded animate-pulse" referrerPolicy="no-referrer" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-accent-gold/20 flex items-center justify-center text-accent-gold"><Coffee size={12} /></div>
+                          )}
+                          <span className="text-[10px] font-bold text-white uppercase tracking-wider">Kaktus Coffee</span>
+                        </div>
+                        <div className="flex gap-2 text-[8px] text-accent-gold font-mono uppercase">
+                          <span>Beranda</span>
+                          <span>Menu</span>
+                          <span>Cabang</span>
+                        </div>
+                      </div>
+
+                      {/* Simulated Hero Slogan */}
+                      <div className="absolute bottom-4 left-4 text-left space-y-0.5">
+                        <h4 className="text-white text-sm font-black tracking-wider uppercase">
+                          {bannerForm.title || banners[0]?.title || 'KAKTUS COFFEE'}
+                        </h4>
+                        <p className="text-[10px] text-accent-gold font-mono font-light leading-none">
+                          {bannerForm.subtitle || banners[0]?.subtitle || 'Eatery & Life'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
               </div>
             </div>
           )}
